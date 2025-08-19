@@ -113,7 +113,6 @@ build_kraken_tree <- function(report) {
   res
 }
 
-
 ## Collapse taxonomic taxRanks to only those mentioned in keep_taxRanks
 collapse.taxRanks <- function(krakenlist,keep_taxRanks=LETTERS,filter_taxon=NULL) {
   ## input: a list, in which each element is either a

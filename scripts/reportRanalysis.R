@@ -8,7 +8,7 @@
 # Usage: Rscript reportRanalysis.R --input-dir <path> --proj-name <name> [options]
 
 library(here)
-source(here("scripts", "utils.R"))
+source(here("Ranalysis", "scripts", "utils.R"))
 library(parallel)
 library(doParallel)
 library(dplyr)
@@ -120,7 +120,7 @@ create_config <- function(args = commandArgs(trailingOnly = TRUE)) {
     stop("ERROR: Input directory does not exist: ", config$INPUT_DIR)
   }
   
-  # Create output paths
+  # Create output paths - separate outputs and reports directories
   config$output_dir <- file.path(config$OUTPUT_BASE_DIR, paste0(config$PROJ_NAME, "_outputs"))
   config$reports_dir <- file.path(config$output_dir, "reports")
   
@@ -250,7 +250,7 @@ run_output_processing <- function(config, args = NULL) {
   
   start_time <- Sys.time()
   
-  run_as_script(here("scripts", "output_processing.R"), args)
+  run_as_script(here("Ranalysis", "scripts", "output_processing.R"), args)
   
   end_time <- Sys.time()
   processing_time <- difftime(end_time, start_time, units = "mins")
@@ -326,7 +326,7 @@ run_annotation_analysis <- function(config) {
     
     # Run annotation script
     tryCatch({
-      run_as_script(here("scripts", "annotate_species.R"), 
+      run_as_script(here("Ranalysis", "scripts", "annotate_species.R"), 
                     "--df", "species_list_unaligned",
                     "--output", "annotated_species_list")
       
@@ -348,22 +348,22 @@ run_annotation_analysis <- function(config) {
           # Generate basic annotation plots
           tryCatch({
             # HOMD basic plot
-            run_as_script(here("scripts", "annotate_species_plots.R"), 
+            run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                           "--df", "annotated_species_list",
                           "--plot-type", "homd")
             
             # Risk group basic plot
-            run_as_script(here("scripts", "annotate_species_plots.R"), 
+            run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                           "--df", "annotated_species_list",
                           "--plot-type", "risk_group")
             
             # Kingdom basic plot
-            run_as_script(here("scripts", "annotate_species_plots.R"), 
+            run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                           "--df", "annotated_species_list",
                           "--plot-type", "kingdom")
             
             # Summary basic plot
-            run_as_script(here("scripts", "annotate_species_plots.R"), 
+            run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                           "--df", "annotated_species_list",
                           "--plot-type", "summary")
             
@@ -383,24 +383,24 @@ run_annotation_analysis <- function(config) {
               assign("annotated_species_list", annotated_data, envir = .GlobalEnv)
               
               # Generate detailed plots with log cladeReads_mean
-              run_as_script(here("scripts", "annotate_species_plots.R"), 
+              run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                             "--df", "annotated_species_list",
                             "--plot-type", "homd",
                             "--detailed", "cladeReads_mean_log")
               
-              run_as_script(here("scripts", "annotate_species_plots.R"), 
+              run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                             "--df", "annotated_species_list",
                             "--plot-type", "risk_group",
                             "--detailed", "cladeReads_mean_log")
               
               # Generate detailed plots with log cladeReads_max if available
               if ("cladeReads_max_log" %in% colnames(annotated_data)) {
-                run_as_script(here("scripts", "annotate_species_plots.R"), 
+                run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                               "--df", "annotated_species_list",
                               "--plot-type", "homd",
                               "--detailed", "cladeReads_max_log")
                 
-                run_as_script(here("scripts", "annotate_species_plots.R"), 
+                run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                               "--df", "annotated_species_list",
                               "--plot-type", "risk_group",
                               "--detailed", "cladeReads_max_log")
@@ -408,12 +408,12 @@ run_annotation_analysis <- function(config) {
               
               # Generate detailed plots with Frequency if available
               if ("Freq" %in% colnames(annotated_data)) {
-                run_as_script(here("scripts", "annotate_species_plots.R"), 
+                run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                               "--df", "annotated_species_list",
                               "--plot-type", "homd",
                               "--detailed", "Freq")
                 
-                run_as_script(here("scripts", "annotate_species_plots.R"), 
+                run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                               "--df", "annotated_species_list",
                               "--plot-type", "risk_group",
                               "--detailed", "Freq")
@@ -437,23 +437,23 @@ run_annotation_analysis <- function(config) {
                 assign("annotated_species_list", annotated_data, envir = .GlobalEnv)
                 
                 # Generate detailed plots with log Bracken reads mean
-                run_as_script(here("scripts", "annotate_species_plots.R"), 
+                run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                               "--df", "annotated_species_list",
                               "--plot-type", "homd",
                               "--detailed", "bracken_reads_mean_log")
                 
-                run_as_script(here("scripts", "annotate_species_plots.R"), 
+                run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                               "--df", "annotated_species_list",
                               "--plot-type", "risk_group",
                               "--detailed", "bracken_reads_mean_log")
                 
                 # Generate detailed plots with log Bracken reads max
-                run_as_script(here("scripts", "annotate_species_plots.R"), 
+                run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                               "--df", "annotated_species_list",
                               "--plot-type", "homd",
                               "--detailed", "bracken_reads_max_log")
                 
-                run_as_script(here("scripts", "annotate_species_plots.R"), 
+                run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                               "--df", "annotated_species_list",
                               "--plot-type", "risk_group",
                               "--detailed", "bracken_reads_max_log")
@@ -496,7 +496,7 @@ create_correlation_analysis <- function(data1, data2, data1_name, data2_name, ou
   if (!dir.exists(output_dir)) {
     dir.create(output_dir, recursive = TRUE)
   }
-
+  
   # Get sample columns
   cols1 <- grep("_cladeReads$", colnames(data1), value = TRUE)
   cols2 <- grep("_cladeReads$", colnames(data2), value = TRUE)
@@ -550,7 +550,7 @@ create_correlation_analysis <- function(data1, data2, data1_name, data2_name, ou
             label = ifelse(abs(log_reads1 - log_reads2) > 2 | 
                           log_reads1 > 4 | log_reads2 > 4, name, NA)
           )
-
+        # Create the correlation plot
         gg_correlation <- ggplot(sample_comparison, aes(x = log_reads1, y = log_reads2)) +
           geom_point(alpha = 0.6, size = 1.5) + 
           geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dotted") +
@@ -760,54 +760,63 @@ run_correlation_analysis <- function(config) {
 # Generate batch report
 generate_batch_report <- function(config, metadata) {
   
+  # Extract combined_metadata from metadata parameter (if available)
+  combined_metadata <- metadata$combined_metadata
+  
+  cat("\n--- Generating batch report ---\n")
+  
+  # Load the combined_report_data
+  combined_report_files <- list.files(config$output_dir, pattern = "sample_report_data.*op\\.csv$", full.names = TRUE)
+  
+  if (length(combined_report_files) == 0) {
+    cat("No sample report data files found for batch report generation\n")
+    return(NULL)
+  }
+  
+  combined_report_file <- combined_report_files[1]  # Use the first (most recent) file
+  cat("Loading combined report data from:", basename(combined_report_file), "\n")
+  combined_report_data <- read.csv(combined_report_file, stringsAsFactors = FALSE)
+  
+  # Display info about the loaded data
+  cat("Loaded report data with", nrow(combined_report_data), "rows and", ncol(combined_report_data), "columns\n")
+  
+  # Show which optional columns are present
+  optional_cols <- c("confidence_levels", "minimum_hit_groups", "human_reads", "database_used")
+  present_optional <- optional_cols[optional_cols %in% colnames(combined_report_data)]
+  if (length(present_optional) > 0) {
+    cat("Optional columns detected:", paste(present_optional, collapse = ", "), "\n")
+  }
+  
+  # Check for subspecies data
+  subspecies_cols <- grep("^S[123]_", colnames(combined_report_data), value = TRUE)
+  if (length(subspecies_cols) > 0) {
+    cat("Subspecies columns detected:", length(subspecies_cols), "columns\n")
+  }
+  
+  # Initialize combined_report_with_metadata as the basic report data
+  combined_report_with_metadata <- combined_report_data
+  
+  # Merge metadata if available
   if (!is.null(combined_metadata)) {
     cat("Successfully parsed metadata for", nrow(combined_metadata), "samples\n")
+    cat("Merging metadata with combined report data...\n")
     
-    # Load the combined_report_data to add metadata
-    combined_report_files <- list.files(config$output_dir, pattern = paste0("sample_report_data", format(Sys.time(), "%y%m%d"), "op.csv"), full.names = TRUE)
-    
-    if (length(combined_report_files) > 0) {
-      combined_report_file <- combined_report_files[1]  # Use the first (most recent) file
-      cat("Loading combined report data from:", basename(combined_report_file), "\n")
-      combined_report_data <- read.csv(combined_report_file, stringsAsFactors = FALSE)
-      
-      # Display info about the loaded data
-      cat("Loaded report data with", nrow(combined_report_data), "rows and", ncol(combined_report_data), "columns\n")
-      
-      # Show which optional columns are present
-      optional_cols <- c("confidence_levels", "minimum_hit_groups", "human_reads", "database_used")
-      present_optional <- optional_cols[optional_cols %in% colnames(combined_report_data)]
-      if (length(present_optional) > 0) {
-        cat("Optional columns detected:", paste(present_optional, collapse = ", "), "\n")
-      }
-      
-      # Check for subspecies data
-      subspecies_cols <- grep("^S[123]_", colnames(combined_report_data), value = TRUE)
-      if (length(subspecies_cols) > 0) {
-        cat("Subspecies columns detected:", length(subspecies_cols), "columns\n")
-      }
-      
-      # Merge metadata with combined_report_data
-      cat("Merging metadata with combined report data...\n")
-      combined_report_with_metadata <- merge(combined_report_data, combined_metadata, by = "sample", all.x = TRUE)
-      
-      cat("Merged data now has", ncol(combined_report_with_metadata), "columns\n")
-      
-      # Validate merge results
-      metadata_samples_matched <- sum(!is.na(combined_report_with_metadata$cutadapt_star_samtools_rt) | 
-                                        !is.na(combined_report_with_metadata$condition))
-      cat("Successfully matched metadata for", metadata_samples_matched, "samples\n")
-      
-      # Save the updated combined report data
-      updated_file <- file.path(config$output_dir, paste0("sample_report_data_with_metadata", format(Sys.time(), "%y%m%d"), "op.csv"))
-      write.csv(combined_report_with_metadata, updated_file, row.names = FALSE)
-      cat("Saved combined report data with metadata to:", basename(updated_file), "\n")
-      
-      # Export uncombined report dataframes for each dataset
-      cat("\nExporting dataset-specific report dataframes...\n")
-      
-      # Check if dataset column exists
-      if ("dataset" %in% colnames(combined_report_with_metadata)) {
+    combined_report_with_metadata <- merge(combined_report_data, combined_metadata, by = "sample", all.x = TRUE)
+    cat("Merged data has", nrow(combined_report_with_metadata), "rows\n")
+  } else {
+    cat("No metadata available - generating basic batch report\n")
+  }
+  
+  # Save the updated combined report data
+  updated_file <- file.path(config$output_dir, paste0("sample_report_data_with_metadata", format(Sys.time(), "%y%m%d"), "op.csv"))
+  write.csv(combined_report_with_metadata, updated_file, row.names = FALSE)
+  cat("Saved combined report data to:", basename(updated_file), "\n")
+  
+  # Export uncombined report dataframes for each dataset
+  cat("\nExporting dataset-specific report dataframes...\n")
+  
+  # Check if dataset column exists
+  if ("dataset" %in% colnames(combined_report_with_metadata)) {
         unique_datasets <- unique(combined_report_with_metadata$dataset)
         cat("Found datasets:", paste(unique_datasets, collapse = ", "), "\n")
         
@@ -843,7 +852,7 @@ generate_batch_report <- function(config, metadata) {
       }
       
       # Display summary
-      if (!is.null(runtime_data)) {
+      if (!is.null(combined_metadata) && !is.null(metadata$runtime_data)) {
         cat("\nRuntime data summary:\n")
         runtime_summary_cols <- c("cutadapt_star_samtools_rt", "kraken2_unaligned_rt", "kraken2_nonhuman_rt")
         print(summary(combined_metadata[, runtime_summary_cols[runtime_summary_cols %in% colnames(combined_metadata)]]))
@@ -888,7 +897,7 @@ generate_batch_report <- function(config, metadata) {
         }
       }
       
-      if (!is.null(rrstats_data)) {
+      if (!is.null(combined_metadata) && !is.null(metadata$rrstats_data)) {
         cat("\nRead statistics summary:\n")
         stats_summary_cols <- c("num_input_reads", "uniquely_mapped_reads", "percent_mapped_reads", "uniquely_mapped_percent")
         print(summary(combined_metadata[, stats_summary_cols[stats_summary_cols %in% colnames(combined_metadata)]]))
@@ -897,18 +906,10 @@ generate_batch_report <- function(config, metadata) {
       # Show first few rows
       cat("\nFirst 5 rows of combined data with metadata:\n")
       print(head(combined_report_with_metadata, 5))
-      
-    } else {
-      cat("Combined report data file not found. Metadata saved separately.\n")
-      metadata_file <- file.path(config$output_dir, paste0("sample_metadata", format(Sys.time(), "%y%m%d"), "op.csv"))
-      write.csv(combined_metadata, metadata_file, row.names = FALSE)
-      cat("Saved metadata to:", basename(metadata_file), "\n")
-    }
-  } else {
-    cat("No metadata could be parsed\n")
-  }
   
-  if (!is.null(combined_metadata) && !is.null(combined_report_with_metadata)) {
+  
+  # Generate batch report PDF if we have data (metadata is optional)
+  if (!is.null(combined_report_with_metadata)) {
     
     # Load required libraries for PDF generation
     suppressPackageStartupMessages({
@@ -933,7 +934,7 @@ generate_batch_report <- function(config, metadata) {
     earliest_timestamp <- NULL
     latest_timestamp <- Sys.time()
     
-    if (!is.null(runtime_data)) {
+    if (!is.null(combined_metadata) && !is.null(metadata$runtime_data)) {
       # Try to extract timestamps from runtime files to get processing start time
       runtime_files <- list.files(runtime_folder, pattern = "^runtime", full.names = TRUE)
       if (length(runtime_files) > 0) {
@@ -944,9 +945,9 @@ generate_batch_report <- function(config, metadata) {
       }
     }
     
-    sample_metadata <- metadata_data
+    sample_metadata <- metadata$sample_metadata
     
-    num_samples <- if (!is.null(combined_metadata)) nrow(combined_metadata) else 0
+    num_samples <- if (!is.null(combined_metadata)) nrow(combined_metadata) else nrow(combined_report_with_metadata)
     num_positive <- if (!is.null(sample_metadata) && "condition" %in% colnames(sample_metadata)) {
       sum(grepl("positive|pos", sample_metadata$condition, ignore.case = TRUE), na.rm = TRUE)
     } else {
@@ -977,28 +978,28 @@ generate_batch_report <- function(config, metadata) {
     )
     
     # Add RNAseq statistics
-    if (!is.null(rrstats_data)) {
+    if (!is.null(combined_metadata) && !is.null(metadata$rrstats_data)) {
       rnaseq_text <- paste0(
         "Part 2: Batch RNAseq Statistics\n",
-        "Total samples with read statistics: ", nrow(rrstats_data), "\n",
-        "Samples with <10M unique reads: ", sum(rrstats_data$less_than_10M_unique, na.rm = TRUE), "\n",
-        "Average input reads: ", format(round(mean(rrstats_data$num_input_reads, na.rm = TRUE)), big.mark = ","), "\n",
-        "Average mapping percentage: ", round(mean(rrstats_data$percent_mapped_reads, na.rm = TRUE), 1), "%\n",
-        "Average unique mapping percentage: ", round(mean(rrstats_data$uniquely_mapped_percent, na.rm = TRUE), 1), "%\n\n"
+        "Total samples with read statistics: ", nrow(metadata$rrstats_data), "\n",
+        "Samples with <10M unique reads: ", sum(metadata$rrstats_data$less_than_10M_unique, na.rm = TRUE), "\n",
+        "Average input reads: ", format(round(mean(metadata$rrstats_data$num_input_reads, na.rm = TRUE)), big.mark = ","), "\n",
+        "Average mapping percentage: ", round(mean(metadata$rrstats_data$percent_mapped_reads, na.rm = TRUE), 1), "%\n",
+        "Average unique mapping percentage: ", round(mean(metadata$rrstats_data$uniquely_mapped_percent, na.rm = TRUE), 1), "%\n\n"
       )
     } else {
       rnaseq_text <- "Part 2: Batch RNAseq Statistics\nNo read statistics data available\n\n"
     }
     
     # Add runtime information
-    if (!is.null(runtime_data)) {
+    if (!is.null(metadata$runtime_data)) {
       runtime_text <- paste0(
         "Part 3: Runtime Information\n",
-        "Total samples with runtime data: ", nrow(runtime_data), "\n",
-        "Average Cutadapt/STAR/Samtools runtime: ", round(mean(runtime_data$cutadapt_star_samtools_rt, na.rm = TRUE)), " seconds\n",
-        "Average Kraken2 unaligned runtime: ", round(mean(runtime_data$kraken2_unaligned_rt, na.rm = TRUE)), " seconds\n",
-        "Average Kraken2 non-human runtime: ", round(mean(runtime_data$kraken2_nonhuman_rt, na.rm = TRUE)), " seconds\n",
-        "Samples involved in DB loading: ", sum(runtime_data$is_first_k2_unaligned | runtime_data$is_first_k2_nonhuman, na.rm = TRUE), "\n\n"
+        "Total samples with runtime data: ", nrow(metadata$runtime_data), "\n",
+        "Average Cutadapt/STAR/Samtools runtime: ", round(mean(metadata$runtime_data$cutadapt_star_samtools_rt, na.rm = TRUE)), " seconds\n",
+        "Average Kraken2 unaligned runtime: ", round(mean(metadata$runtime_data$kraken2_unaligned_rt, na.rm = TRUE)), " seconds\n",
+        "Average Kraken2 non-human runtime: ", round(mean(metadata$runtime_data$kraken2_nonhuman_rt, na.rm = TRUE)), " seconds\n",
+        "Samples involved in DB loading: ", sum(metadata$runtime_data$is_first_k2_unaligned | metadata$runtime_data$is_first_k2_nonhuman, na.rm = TRUE), "\n\n"
       )
     } else {
       runtime_text <- "Part 3: Runtime Information\nNo runtime data available\n\n"
@@ -1010,7 +1011,7 @@ generate_batch_report <- function(config, metadata) {
     text(0.05, 0.95, full_text, adj = c(0, 1), cex = 0.8, family = "mono")
     
     # PAGE 2: RNAseq Statistics Table Reference
-    if (!is.null(rrstats_data)) {
+    if (!is.null(metadata$rrstats_data)) {
       plot.new()
       
       title_text <- "Part 2: Batch RNAseq Statistics"
@@ -1032,18 +1033,18 @@ generate_batch_report <- function(config, metadata) {
         "Data source: Parsed from run_read_stats*.txt files in rrstats/ folder\n",
         "Output location: Check outputs/ directory for CSV files containing this data\n\n",
         "Key findings:\n",
-        "- Total samples with read statistics: ", nrow(rrstats_data), "\n",
-        "- Samples with <10M unique reads: ", sum(rrstats_data$less_than_10M_unique, na.rm = TRUE), "\n",
-        "- Average input reads: ", format(round(mean(rrstats_data$num_input_reads, na.rm = TRUE)), big.mark = ","), "\n",
-        "- Average mapping percentage: ", round(mean(rrstats_data$percent_mapped_reads, na.rm = TRUE), 1), "%\n",
-        "- Average unique mapping percentage: ", round(mean(rrstats_data$uniquely_mapped_percent, na.rm = TRUE), 1), "%"
+        "- Total samples with read statistics: ", nrow(metadata$rrstats_data), "\n",
+        "- Samples with <10M unique reads: ", sum(metadata$rrstats_data$less_than_10M_unique, na.rm = TRUE), "\n",
+        "- Average input reads: ", format(round(mean(metadata$rrstats_data$num_input_reads, na.rm = TRUE)), big.mark = ","), "\n",
+        "- Average mapping percentage: ", round(mean(metadata$rrstats_data$percent_mapped_reads, na.rm = TRUE), 1), "%\n",
+        "- Average unique mapping percentage: ", round(mean(metadata$rrstats_data$uniquely_mapped_percent, na.rm = TRUE), 1), "%"
       )
       
       text(0.05, 0.85, ref_text, adj = c(0, 1), cex = 0.7, family = "mono")
     }
     
     # PAGE 3: Runtime Information Table Reference 
-    if (!is.null(runtime_data)) {
+    if (!is.null(metadata$runtime_data)) {
       plot.new()
       
       title_text <- "Part 3: Runtime Information"
@@ -1064,11 +1065,11 @@ generate_batch_report <- function(config, metadata) {
         "Merging: Combined with read statistics by sample name\n",
         "Output location: Check outputs/ directory for CSV files containing this data\n\n",
         "Key findings:\n",
-        "- Total samples with runtime data: ", nrow(runtime_data), "\n",
-        "- Average Cutadapt/STAR/Samtools runtime: ", round(mean(runtime_data$cutadapt_star_samtools_rt, na.rm = TRUE)), " seconds\n",
-        "- Average Kraken2 unaligned runtime: ", round(mean(runtime_data$kraken2_unaligned_rt, na.rm = TRUE)), " seconds\n",
-        "- Average Kraken2 non-human runtime: ", round(mean(runtime_data$kraken2_nonhuman_rt, na.rm = TRUE)), " seconds\n",
-        "- Samples involved in DB loading: ", sum(runtime_data$is_first_k2_unaligned | runtime_data$is_first_k2_nonhuman, na.rm = TRUE)
+        "- Total samples with runtime data: ", nrow(metadata$runtime_data), "\n",
+        "- Average Cutadapt/STAR/Samtools runtime: ", round(mean(metadata$runtime_data$cutadapt_star_samtools_rt, na.rm = TRUE)), " seconds\n",
+        "- Average Kraken2 unaligned runtime: ", round(mean(metadata$runtime_data$kraken2_unaligned_rt, na.rm = TRUE)), " seconds\n",
+        "- Average Kraken2 non-human runtime: ", round(mean(metadata$runtime_data$kraken2_nonhuman_rt, na.rm = TRUE)), " seconds\n",
+        "- Samples involved in DB loading: ", sum(metadata$runtime_data$is_first_k2_unaligned | metadata$runtime_data$is_first_k2_nonhuman, na.rm = TRUE)
       )
       
       text(0.05, 0.85, ref_text, adj = c(0, 1), cex = 0.7, family = "mono")
@@ -1115,10 +1116,10 @@ generate_batch_report <- function(config, metadata) {
     }
     
     # Runtime Plots - each on its own page
-    if (!is.null(runtime_data)) {
+    if (!is.null(metadata$runtime_data)) {
       
       # Prepare data for plotting
-      runtime_plot_data <- runtime_data
+      runtime_plot_data <- metadata$runtime_data
       
       # Add asterisks to sample names for first samples
       runtime_plot_data$sample_display <- ifelse(
@@ -1128,9 +1129,9 @@ generate_batch_report <- function(config, metadata) {
       )
       
       # Add read statistics if available
-      if (!is.null(rrstats_data)) {
+      if (!is.null(metadata$rrstats_data)) {
         runtime_plot_data <- merge(runtime_plot_data, 
-                                   rrstats_data[, c("sample", "num_input_reads", "percent_mapped_reads")], 
+                                   metadata$rrstats_data[, c("sample", "num_input_reads", "percent_mapped_reads")], 
                                    by = "sample", all.x = TRUE)
       }
       
@@ -1265,12 +1266,12 @@ generate_batch_report <- function(config, metadata) {
         # Create 2x2 grid of basic annotation plots with smaller size to prevent cutoff
         suppressPackageStartupMessages(library(gridExtra))
         basic_grid <- grid.arrange(
-          homd_basic + labs(title = paste("HOMD Categories -", PROJ_NAME)) + theme(plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm")),
-          risk_basic + labs(title = paste("Risk Groups -", PROJ_NAME)) + theme(plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm")),
-          kingdom_basic + labs(title = paste("Kingdom Distribution -", PROJ_NAME)) + theme(plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm")),
-          summary_basic + labs(title = paste("Annotation Summary -", PROJ_NAME)) + theme(plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm")),
+          homd_basic + labs(title = paste("HOMD Categories -", config$PROJ_NAME)) + theme(plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm")),
+          risk_basic + labs(title = paste("Risk Groups -", config$PROJ_NAME)) + theme(plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm")),
+          kingdom_basic + labs(title = paste("Kingdom Distribution -", config$PROJ_NAME)) + theme(plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm")),
+          summary_basic + labs(title = paste("Annotation Summary -", config$PROJ_NAME)) + theme(plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm")),
           nrow = 2, ncol = 2,
-          top = paste("Species Annotation Overview -", PROJ_NAME),
+          top = paste("Species Annotation Overview -", config$PROJ_NAME),
           heights = c(0.45, 0.45),
           widths = c(0.48, 0.48)
         )
@@ -1315,14 +1316,14 @@ generate_batch_report <- function(config, metadata) {
             exists("detailed_risk_group_plot", envir = .GlobalEnv)) {
           
           # Re-generate plots specifically for cladeReads_max to ensure we have the right plots
-          run_as_script(here("scripts", "annotate_species_plots.R"), 
+          run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                         "--df", "annotated_species_list",
                         "--plot-type", "homd",
                         "--detailed", "cladeReads_max_log")
           homd_detailed_max <- get("detailed_homd_plot", envir = .GlobalEnv) + 
             labs(title = paste(config$PROJ_NAME, "- HOMD Categories (log cladeReads_max)"))
           
-          run_as_script(here("scripts", "annotate_species_plots.R"), 
+          run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                         "--df", "annotated_species_list",
                         "--plot-type", "risk_group",
                         "--detailed", "cladeReads_max_log")
@@ -1334,7 +1335,7 @@ generate_batch_report <- function(config, metadata) {
             homd_detailed_max,
             risk_detailed_max,
             nrow = 2, ncol = 1,
-            top = paste("Detailed Species Analysis (log cladeReads_max) -", PROJ_NAME)
+            top = paste("Detailed Species Analysis (log cladeReads_max) -", config$PROJ_NAME)
           )
           
           cat("Detailed annotation plots (cladeReads_max) page added\n")
@@ -1353,14 +1354,14 @@ generate_batch_report <- function(config, metadata) {
           cat("Adding Bracken detailed annotation plots to PDF...\n")
           
           # Generate plots for Bracken mean reads
-          run_as_script(here("scripts", "annotate_species_plots.R"), 
+          run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                         "--df", "annotated_species_list",
                         "--plot-type", "homd",
                         "--detailed", "bracken_reads_mean_log")
           homd_bracken_mean <- get("detailed_homd_plot", envir = .GlobalEnv) + 
             labs(title = paste(config$PROJ_NAME, "- HOMD Categories (log Bracken reads mean)"))
           
-          run_as_script(here("scripts", "annotate_species_plots.R"), 
+          run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                         "--df", "annotated_species_list",
                         "--plot-type", "risk_group",
                         "--detailed", "bracken_reads_mean_log")
@@ -1379,14 +1380,14 @@ generate_batch_report <- function(config, metadata) {
           
           # Generate plots for Bracken max reads if available
           if ("bracken_reads_max_log" %in% colnames(annotated_data)) {
-            run_as_script(here("scripts", "annotate_species_plots.R"), 
+            run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                           "--df", "annotated_species_list",
                           "--plot-type", "homd",
                           "--detailed", "bracken_reads_max_log")
             homd_bracken_max <- get("detailed_homd_plot", envir = .GlobalEnv) + 
               labs(title = paste(config$PROJ_NAME, "- HOMD Categories (log Bracken reads max)"))
             
-            run_as_script(here("scripts", "annotate_species_plots.R"), 
+            run_as_script(here("Ranalysis", "scripts", "annotate_species_plots.R"), 
                           "--df", "annotated_species_list",
                           "--plot-type", "risk_group",
                           "--detailed", "bracken_reads_max_log")

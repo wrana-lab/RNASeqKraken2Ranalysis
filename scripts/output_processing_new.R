@@ -7,7 +7,7 @@
 # Compatible with various kreport file naming patterns
 
 library(here)
-source(here("scripts", "utils.R"))
+source(here("Ranalysis", "scripts", "utils.R"))
 library(purrr)
 library(tidyr)
 library(dplyr)
@@ -20,8 +20,12 @@ if ("--parallel" %in% commandArgs(trailingOnly = TRUE)) {
 
 # Function to display help
 show_help <- function() {
-  cat("Usage: Rscript output_processing.R [OPTIONS]\n\n")
-  cat("Inputs:\n")
+  cat("Usage: Rscript output_processing_v5.R [OPTIONS]\n\n")
+  cat("Options:\n")
+  cat("  --exclude-taxid <ID>       Exclude species with this taxonomy ID (e.g., 9606 for Homo sapiens)\n")
+  cat("  --no-bracken              Skip bracken file processing\n")
+  cat("  --min-reads <N>           Minimum clade reads threshold (default: 0)\n")
+  cat("  --top-n <N>               Number of top species to analyze (default: 3)\n")
   cat("  --unaligned-kreports <DIR> Path to unaligned kreports folder (default: NULL)\n")
   cat("  --unaligned-bracken <DIR>  Path to unaligned bracken folder (default: NULL)\n")
   cat("  --nonhuman-kreports <DIR>  Path to nonhuman kreports folder (default: NULL)\n")
@@ -29,19 +33,14 @@ show_help <- function() {
   cat("  --runtime-dir <DIR>       Path to runtime folder for parsing runtime files (default: NULL)\n")
   cat("  --rrstats-dir <DIR>       Path to read statistics folder for parsing rrstats files (default: NULL)\n")
   cat("  --metadata-dir <DIR>      Path to directory containing sample metadata CSV files (default: NULL)\n")
-  cat("Options:\n")
-  cat("  --no-bracken              Skip bracken file processing\n")
-  cat("  --subspecies              Include subspecies (S1, S2, S3) in addition to species (default: FALSE)\n")
-  cat("  --params                  Add confidence_levels, minimum_hit_groups, and human_reads columns to long data (default: FALSE)\n")
-  cat("  --parallel                Use parallel processing with cluster from global environment 'cl' (default: FALSE)\n")
-  cat("  --output                  Save results to CSV files (default: FALSE)\n")
   cat("  --output-dir <DIR>         Output directory (default: outputs/full_run)\n")
-  cat("Filtering:\n")
-  cat("  --exclude-taxid <ID>       Exclude species with this taxonomy ID (e.g., 9606 for Homo sapiens)\n")
-  cat("  --min-reads <N>           Minimum clade reads threshold (default: 0)\n")
-  cat("  --top-n <N>               Number of top species to analyze (default: 3)\n")
+  cat("  --output                  Save results to CSV files (default: FALSE)\n")
+  cat("  --params                  Add confidence_levels, minimum_hit_groups, and human_reads columns to long data (default: FALSE)\n")
+  cat("  --subspecies              Include subspecies (S1, S2, S3) in addition to species (default: FALSE)\n")
   cat("  --minimizer-ratio <R>     Filter by minimum ratio of distinct_minimizers/cladeReads (default: NULL)\n")
   cat("  --minimizer-threshold <N> Filter by minimum distinct_minimizers threshold (default: NULL)\n")
+  cat("  --parallel                Use parallel processing with cluster from global environment 'cl' (default: FALSE)\n")
+  cat("  --help, -h                Show this help message\n\n")
   cat("Examples:\n")
   cat("  Rscript output_processing_v5.R                          # Default settings\n")
   cat("  Rscript output_processing_v5.R --exclude-taxid 9606     # Exclude Homo sapiens\n")
@@ -174,7 +173,7 @@ if (length(args) > 0) {
     }
   }
 }
-rm(i, show_help)
+rm(show_help)
 
 # Display final configuration
 cat("\n=== Configuration ===\n")
@@ -211,15 +210,9 @@ if (USE_PARALLEL) {
     cat("Number of workers:", getDoParWorkers(), "\n")
   } else {
     warning("Parallel processing requested but no cluster 'cl' found in global environment")
-    cat("Setting up parallel processing with new cluster \n")
-    cl_setup_start_time <- Sys.time()
-    cl <- makeCluster(detectCores())
-    registerDoParallel(cl)
-    cat("Cluster setup completed in", round(difftime(Sys.time(), cl_setup_start_time, units = "secs"), 2), "seconds\n")
-    rm(cl_setup_start_time)
-    # cat("To create a cluster, run: cl <- parallel::makeCluster(8) # or desired number of cores\n")
-    # USE_PARALLEL <- FALSE
-    # cat("Falling back to sequential processing\n")
+    cat("To create a cluster, run: cl <- parallel::makeCluster(8) # or desired number of cores\n")
+    USE_PARALLEL <- FALSE
+    cat("Falling back to sequential processing\n")
   }
 }
 
@@ -347,7 +340,7 @@ filter_kreport_data <- function(kreport_df, sample_name, min_clade_reads = MIN_C
     if (!is.null(minimizer_ratio)) {
       kreport_df <- kreport_df %>%
         filter(is.na(distinct_minimizers) | distinct_minimizers == 0 | 
-                 (cladeReads / pmax(distinct_minimizers, 1)) >= (1/minimizer_ratio))
+               (cladeReads / pmax(distinct_minimizers, 1)) >= (1/minimizer_ratio))
       cat("Sample", sample_name, ": applied minimizer ratio filter (>=", minimizer_ratio, 
           "): from", pre_minimizer_count, "to", nrow(kreport_df), "species\n")
     }
@@ -371,10 +364,34 @@ process_kreport_folder <- function(kreports_folder, include_subspecies = INCLUDE
     stop("Directory does not exist: ", kreports_folder)
   }
   
-  kreports_files <- list.files(kreports_folder, pattern = "\\.(kreport|k2report)$", full.names = TRUE)
+  # Initialize fresh report_data for this folder
+  if (include_subspecies) {
+    report_data_df <- tibble(
+      sample = character(), 
+      unclassified_counts = integer(), 
+      confidence = integer(), 
+      minimum_hits = integer(), 
+      database_used = character(),
+      species_count = integer(),
+      subspecies_count = integer(),
+      total_species_count = integer(),
+      filtered_species_count = integer(),
+      filtered_subspecies_count = integer(),
+      filtered_total_species_count = integer()
+    )
+  } else {
+    report_data_df <- tibble(
+      sample = character(), 
+      unclassified_counts = integer(), 
+      confidence = integer(), 
+      minimum_hits = integer(), 
+      database_used = character(),
+      species_count = integer(),
+      filtered_species_count = integer()
+    )
+  }
   
-  # Filter out files containing "bracken_species" in the filename
-  kreports_files <- kreports_files[!grepl("bracken_species", basename(kreports_files))]
+  kreports_files <- list.files(kreports_folder, pattern = "\\.(kreport|k2report)$", full.names = TRUE)
   
   if (length(kreports_files) == 0) {
     warning("No .kreport or .k2report files found in: ", kreports_folder)
@@ -391,23 +408,23 @@ process_kreport_folder <- function(kreports_folder, include_subspecies = INCLUDE
   if (USE_PARALLEL && exists("cl", envir = .GlobalEnv)) {
     cat("Reading kreport files in parallel...\n")
     kreports_raw_list <- foreach(i = seq_along(kreports_files), 
-                                 .export = c("read_report2", "build_kraken_tree", "collapse.taxRanks", "delete_taxRanks_below", "parse_sample_info")) %dopar% {
-                                   file <- kreports_files[i]
-                                   
-                                   # Read kreport file
-                                   kreport_df <- read_report2(myfile = file, has_header = FALSE, add_taxRank_columns = FALSE, keep_taxRanks = c("D", "K", "P", "C", "O", "F", "G", "S", "S1", "S2", "S3"))
-                                   
-                                   if (is.null(kreport_df) || nrow(kreport_df) == 0) {
-                                     return(NULL)
-                                   }
-                                   
-                                   # Store raw kreport with file info
-                                   list(
-                                     file = file,
-                                     data = kreport_df,
-                                     sample_info = parse_sample_info(file)
-                                   )
-                                 }
+                                .export = c("read_report2", "build_kraken_tree", "collapse.taxRanks", "delete_taxRanks_below", "parse_sample_info")) %dopar% {
+      file <- kreports_files[i]
+      
+      # Read kreport file
+      kreport_df <- read_report2(myfile = file, has_header = FALSE, add_taxRank_columns = FALSE, keep_taxRanks = c("D", "K", "P", "C", "O", "F", "G", "S", "S1", "S2", "S3"))
+      
+      if (is.null(kreport_df) || nrow(kreport_df) == 0) {
+        return(NULL)
+      }
+      
+      # Store raw kreport with file info
+      list(
+        file = file,
+        data = kreport_df,
+        sample_info = parse_sample_info(file)
+      )
+    }
   } else {
     cat("Reading kreport files sequentially...\n")
     for (i in seq_along(kreports_files)) {
@@ -416,7 +433,7 @@ process_kreport_folder <- function(kreports_folder, include_subspecies = INCLUDE
       
       # Read kreport file
       kreport_df <- read_report2(myfile = file, has_header = FALSE, add_taxRank_columns = FALSE, keep_taxRanks = c("D", "K", "P", "C", "O", "F", "G", "S", "S1", "S2", "S3"))
-      
+
       if (is.null(kreport_df) || nrow(kreport_df) == 0) {
         warning("Failed to read or empty file: ", file)
         next
@@ -430,7 +447,7 @@ process_kreport_folder <- function(kreports_folder, include_subspecies = INCLUDE
       )
     }
   }
-  
+
   # Remove NULL entries
   kreports_raw_list <- kreports_raw_list[!sapply(kreports_raw_list, is.null)]
   
@@ -440,36 +457,10 @@ process_kreport_folder <- function(kreports_folder, include_subspecies = INCLUDE
   }
   end_time <- Sys.time()
   cat("Finished reading kreport files in", round(difftime(end_time, start_time, units = "secs"), 2), "seconds\n")
+
+
   
   # Now process each kreport for report data and filtering
-  # Initialize fresh report_data for this folder
-  if (include_subspecies) {
-    report_data_df <- tibble(
-      sample = character(), 
-      unclassified_counts = integer(), 
-      classified_counts = integer(), 
-      confidence = integer(), 
-      minimum_hits = integer(), 
-      database_used = character(),
-      species_count = integer(),
-      subspecies_count = integer(),
-      total_species_count = integer(),
-      filtered_species_count = integer(),
-      filtered_subspecies_count = integer(),
-      filtered_total_species_count = integer()
-    )
-  } else {
-    report_data_df <- tibble(
-      sample = character(), 
-      unclassified_counts = integer(), 
-      classified_counts = integer(), 
-      confidence = integer(), 
-      minimum_hits = integer(), 
-      database_used = character(),
-      species_count = integer(),
-      filtered_species_count = integer()
-    )
-  }
   kreports_list <- list()
   
   for (i in seq_along(kreports_raw_list)) {
@@ -489,7 +480,6 @@ process_kreport_folder <- function(kreports_folder, include_subspecies = INCLUDE
         tibble(
           sample = sample_info$trimmed_name,
           unclassified_counts = unclassified_reads,
-          classified_counts = kreport_df$cladeReads[kreport_df$taxID == 1], 
           confidence = sample_info$confidence,
           minimum_hits = sample_info$minimum_hits,
           database_used = sample_info$database_used,
@@ -507,7 +497,6 @@ process_kreport_folder <- function(kreports_folder, include_subspecies = INCLUDE
         tibble(
           sample = sample_info$trimmed_name,
           unclassified_counts = unclassified_reads,
-          classified_counts = kreport_df$cladeReads[kreport_df$taxID == 1], 
           confidence = sample_info$confidence,
           minimum_hits = sample_info$minimum_hits,
           database_used = sample_info$database_used,
@@ -582,9 +571,9 @@ process_kreport_folder <- function(kreports_folder, include_subspecies = INCLUDE
     
     if (nrow(duplicate_taxids) > 0) {
       warning("Sample ", sample_info$trimmed_name, " has ", nrow(duplicate_taxids), 
-              " duplicate taxIDs: ", paste(duplicate_taxids$taxID, collapse = ", "))
+             " duplicate taxIDs: ", paste(duplicate_taxids$taxID, collapse = ", "))
     }
-    
+
     # Add processed kreport to list
     kreports_list[[i]] <- processed_kreport
   }
@@ -745,7 +734,7 @@ add_summary_stats <- function(merged_data) {
 
 # Function to get complete species list with topN frequency included
 get_species_list_with_frequency <- function(merged_data, count_column_pattern = "_cladeReads$", 
-                                            top_n = 10, exclude_taxid = NULL) {
+                                           top_n = 10, exclude_taxid = NULL) {
   count_cols <- grep(count_column_pattern, colnames(merged_data), value = TRUE)
   
   if (length(count_cols) == 0) {
@@ -850,14 +839,6 @@ parse_sample_metadata <- function(input_dir) {
       # Remove rows with missing sample names
       metadata <- metadata[!is.na(metadata$sample) & metadata$sample != "", ]
       
-      # Apply consistent sample name trimming using parse_sample_info
-      if (nrow(metadata) > 0) {
-        metadata$sample <- sapply(metadata$sample, function(x) {
-          sample_info <- parse_sample_info(x)
-          return(sample_info$trimmed_name)
-        })
-      }
-      
       if (nrow(metadata) > 0) {
         all_metadata[[basename(metadata_file)]] <- metadata
       }
@@ -928,11 +909,10 @@ parse_runtime_files <- function(runtime_folder) {
       if (grepl("^Cutadapt/STAR/Samtools \\(.*\\); RT:", line)) {
         sample_match <- regmatches(line, regexpr("\\(([^)]+)\\)", line))
         sample_name <- gsub("[()]", "", sample_match)
-        # Use parse_sample_info to get consistent trimmed name
-        sample_info <- parse_sample_info(sample_name)
-        sample_name <- sample_info$trimmed_name
         rt_match <- regmatches(line, regexpr("RT: (\\d+) seconds", line))
-        rt_seconds <- as.numeric(gsub("RT: | seconds", "", rt_match))        # Find existing row or create new one
+        rt_seconds <- as.numeric(gsub("RT: | seconds", "", rt_match))
+        
+        # Find existing row or create new one
         existing_row <- which(runtime_data$sample == sample_name)
         if (length(existing_row) > 0) {
           # Update existing row (take latest runtime)
@@ -956,9 +936,8 @@ parse_runtime_files <- function(runtime_folder) {
       if (grepl("^Kraken2 unaligned \\(.*\\); RT:", line)) {
         sample_match <- regmatches(line, regexpr("\\(([^)]+)\\)", line))
         sample_name <- gsub("[()]", "", sample_match)
-        # Use parse_sample_info to get consistent trimmed name
-        sample_info <- parse_sample_info(sample_name)
-        sample_name <- sample_info$trimmed_name
+        # Remove suffix pattern like "_S109" to match sample names
+        sample_name <- sub("_S\\d+$", "", sample_name)
         rt_match <- regmatches(line, regexpr("RT: (\\d+) seconds", line))
         rt_seconds <- as.numeric(gsub("RT: | seconds", "", rt_match))
         
@@ -993,9 +972,6 @@ parse_runtime_files <- function(runtime_folder) {
       if (grepl("^Kraken2 non-human \\(.*\\); RT:", line)) {
         sample_match <- regmatches(line, regexpr("\\(([^)]+)\\)", line))
         sample_name <- gsub("[()]", "", sample_match)
-        # Use parse_sample_info to get consistent trimmed name
-        sample_info <- parse_sample_info(sample_name)
-        sample_name <- sample_info$trimmed_name
         rt_match <- regmatches(line, regexpr("RT: (\\d+) seconds", line))
         rt_seconds <- as.numeric(gsub("RT: | seconds", "", rt_match))
         
@@ -1083,7 +1059,7 @@ parse_rrstats_files <- function(rrstats_folder) {
     # Read the file as tab-separated
     tryCatch({
       rrstats_data <- read.table(rrstats_file, header = FALSE, sep = "\t", stringsAsFactors = FALSE, 
-                                 skip = 0, fill = TRUE, comment.char = "")
+                                skip = 0, fill = TRUE, comment.char = "")
       
       # Remove any completely empty rows
       rrstats_data <- rrstats_data[!apply(rrstats_data == "" | is.na(rrstats_data), 1, all), ]
@@ -1096,14 +1072,14 @@ parse_rrstats_files <- function(rrstats_folder) {
       
       # Set column names based on the header structure
       colnames(rrstats_data) <- c("sample", "num_input_reads", "avg_input_read_length", 
-                                  "uniquely_mapped_reads", "avg_mapped_length", 
-                                  "reads_assigned_to_genes", "percent_mapped_reads", 
-                                  "uniquely_mapped_percent", "less_than_10M_unique")
+                                 "uniquely_mapped_reads", "avg_mapped_length", 
+                                 "reads_assigned_to_genes", "percent_mapped_reads", 
+                                 "uniquely_mapped_percent", "less_than_10M_unique")
       
       # Convert numeric columns with better error handling
       numeric_cols <- c("num_input_reads", "avg_input_read_length", "uniquely_mapped_reads", 
-                        "avg_mapped_length", "reads_assigned_to_genes", "percent_mapped_reads", 
-                        "uniquely_mapped_percent")
+                       "avg_mapped_length", "reads_assigned_to_genes", "percent_mapped_reads", 
+                       "uniquely_mapped_percent")
       
       for (col in numeric_cols) {
         if (col %in% colnames(rrstats_data)) {
@@ -1121,14 +1097,6 @@ parse_rrstats_files <- function(rrstats_folder) {
       
       # Remove rows where sample name is NA or empty
       rrstats_data <- rrstats_data[!is.na(rrstats_data$sample) & rrstats_data$sample != "", ]
-      
-      # Apply consistent sample name trimming using parse_sample_info
-      if (nrow(rrstats_data) > 0) {
-        rrstats_data$sample <- sapply(rrstats_data$sample, function(x) {
-          sample_info <- parse_sample_info(x)
-          return(sample_info$trimmed_name)
-        })
-      }
       
       if (nrow(rrstats_data) > 0) {
         all_rrstats_data[[basename(rrstats_file)]] <- rrstats_data
@@ -1171,8 +1139,8 @@ parse_rrstats_files <- function(rrstats_folder) {
 
 # Main processing function
 process_dataset <- function(dataset_name, kreports_folder, bracken_folder = NULL, 
-                            process_bracken = PROCESS_BRACKEN, add_params = ADD_PARAMS, 
-                            include_subspecies = INCLUDE_SUBSPECIES) {
+                           process_bracken = PROCESS_BRACKEN, add_params = ADD_PARAMS, 
+                           include_subspecies = INCLUDE_SUBSPECIES) {
   cat("\n=== Processing", dataset_name, "dataset ===\n")
   
   # Process kreports
@@ -1189,14 +1157,14 @@ process_dataset <- function(dataset_name, kreports_folder, bracken_folder = NULL
   
   # Merge data
   merge_results <- merge_data(kreport_results$kreports_combined, bracken_data, 
-                              add_params = add_params, report_data = kreport_results$report_data)
+                             add_params = add_params, report_data = kreport_results$report_data)
   
   # Add summary statistics
   merged_with_stats <- add_summary_stats(merge_results$merged)
   
   # Get species list with topN frequency
   species_list <- get_species_list_with_frequency(merged_with_stats, top_n = TOP_SPECIES_N, 
-                                                  exclude_taxid = EXCLUDE_TAXID)
+                                                 exclude_taxid = EXCLUDE_TAXID)
   cat("Generated species list with", nrow(species_list), "species\n")
   
   result <- list(
@@ -1252,7 +1220,7 @@ if (!is.null(NONHUMAN_KREPORTS_DIR)) {
 if (SAVE_OUTPUT) {
   cat("\n=== Saving outputs ===\n")
   output_dir <- OUTPUT_DIR
-  
+
   # Create output directory if it doesn't exist
   if (!dir.exists(output_dir)) {
     dir.create(output_dir, recursive = TRUE)
@@ -1266,7 +1234,7 @@ if (SAVE_OUTPUT) {
   if (!is.null(unaligned_results$bracken_data) && nrow(unaligned_results$bracken_data) > 0) {
     output_csv_file(unaligned_results$bracken_data, "unaligned_bracken", output_dir, "op")
   }
-  
+
   # Save nonhuman results only if they exist
   if (!is.null(NONHUMAN_KREPORTS_DIR) && exists("nonhuman_results")) {
     output_csv_file(nonhuman_results$merged, "nonhuman_merged", output_dir, "op")
@@ -1278,6 +1246,7 @@ if (SAVE_OUTPUT) {
       output_csv_file(nonhuman_results$bracken_data, "nonhuman_bracken", output_dir, "op")
     }
   }
+
   # Save combined report data
   if (!is.null(NONHUMAN_KREPORTS_DIR) && exists("nonhuman_results")) {
     combined_report_data <- bind_rows(
