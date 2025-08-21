@@ -16,21 +16,61 @@ output_sample_set <- function(x, script_name, file_name = "Uploaded_sample_set-m
   write.table(x = x, file = file_path, sep = "\t", row.names = F)
 }
 
-get_latest_timestamped_file <- function(input_dir = "inputs", pattern) {
-  files <- list.files(path = here(input_dir), pattern = pattern, full.names = TRUE)
-  if (length(files) == 0) {
-    stop("No matching files found in the directory.")
+get_latest_timestamped_file <- function(input_dir = "inputs", pattern, database_type = NULL) {
+  # Special handling for database files
+  if (!is.null(database_type)) {
+    db_dir <- here("databases")
+    if (!dir.exists(db_dir)) {
+      stop("Databases directory not found: ", db_dir)
+    }
+    
+    if (database_type == "epathogen") {
+      pattern <- "epathogen.*\\.csv$"
+    } else if (database_type == "HOMD") {
+      pattern <- "HOMD_taxon_table.*\\.(xls|xlsx|tsv|csv)$"
+    }
+    
+    files <- list.files(path = db_dir, pattern = pattern, full.names = TRUE, ignore.case = TRUE)
+  } else {
+    files <- list.files(path = here(input_dir), pattern = pattern, full.names = TRUE)
   }
-  # Extract numeric timestamps from filenames
-  timestamps <- as.numeric(stringr::str_extract(basename(files), "\\d{6}"))
-  if (all(is.na(timestamps))) {
+  
+  if (length(files) == 0) {
+    if (!is.null(database_type)) {
+      stop("No matching database files found for type: ", database_type)
+    } else {
+      stop("No matching files found in the directory.")
+    }
+  }
+  
+  # Extract various timestamp formats from filenames:
+  basenames <- basename(files)
+  iso_ts <- stringr::str_extract(basenames, "\\d{4}-\\d{2}-\\d{2}")
+  ymd8_ts <- stringr::str_extract(basenames, "(?<!\\d)\\d{8}(?!\\d)")
+  ymd6_ts <- stringr::str_extract(basenames, "(?<!\\d)\\d{6}(?!\\d)")
+
+  dates <- rep(as.Date(NA), length(files))
+  # parse in order of specificity: YYYY-MM-DD, YYYYMMDD, YYMMDD (e.g., runtime_info250819op.csv -> 250819)
+  has_iso <- !is.na(iso_ts)
+  if (any(has_iso)) dates[has_iso] <- as.Date(iso_ts[has_iso], format = "%Y-%m-%d")
+
+  has_8 <- !is.na(ymd8_ts)
+  if (any(has_8)) dates[has_8 & is.na(dates)] <- as.Date(ymd8_ts[has_8 & is.na(dates)], format = "%Y%m%d")
+
+  has_6 <- !is.na(ymd6_ts)
+  if (any(has_6)) dates[has_6 & is.na(dates)] <- as.Date(ymd6_ts[has_6 & is.na(dates)], format = "%y%m%d")
+
+  if (all(is.na(dates))) {
+    # Fallback to file modification time if no timestamps in filename
     file_info <- file.info(files)
     latest_file <- rownames(file_info)[which.max(file_info$mtime)]
   } else {
-    # Select the most recent file based on filename timestamps
-    latest_file <- files[which.max(timestamps)]
+    # select the most recent among parsed dates
+    valid_idx <- which(!is.na(dates))
+    best_idx <- valid_idx[which.max(dates[valid_idx])]
+    latest_file <- files[best_idx]
   }
-  # Read and return the table
+  # Return just the file path
   latest_file
 }
 

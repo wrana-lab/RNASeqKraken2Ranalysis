@@ -14,7 +14,7 @@ suppressPackageStartupMessages({
 })
 
 # Source utils.R for run_as_script functionality
-source(here("Ranalysis", "scripts", "utils.R"))
+source(here("scripts", "utils.R"))
 
 # Define a standard ggplot theme
 my_ggplot_theme <- theme_minimal() +

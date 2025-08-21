@@ -30,7 +30,7 @@ show_help <- function() {
   cat("  --rrstats-dir <DIR>       Path to read statistics folder for parsing rrstats files (default: NULL)\n")
   cat("  --metadata-dir <DIR>      Path to directory containing sample metadata CSV files (default: NULL)\n")
   cat("Options:\n")
-  cat("  --no-bracken              Skip bracken file processing\n")
+  cat("  (bracken processing is enabled only when a bracken directory is provided)\n")
   cat("  --subspecies              Include subspecies (S1, S2, S3) in addition to species (default: FALSE)\n")
   cat("  --params                  Add confidence_levels, minimum_hit_groups, and human_reads columns to long data (default: FALSE)\n")
   cat("  --parallel                Use parallel processing with cluster from global environment 'cl' (default: FALSE)\n")
@@ -45,7 +45,6 @@ show_help <- function() {
   cat("Examples:\n")
   cat("  Rscript output_processing_v5.R                          # Default settings\n")
   cat("  Rscript output_processing_v5.R --exclude-taxid 9606     # Exclude Homo sapiens\n")
-  cat("  Rscript output_processing_v5.R --no-bracken             # Skip bracken processing\n")
   cat("  Rscript output_processing_v5.R --unaligned-kreports /path/to/kreports # Custom kreports path\n")
   cat("  Rscript output_processing_v5.R --output-dir /path/to/output # Custom output directory\n")
   cat("  Rscript output_processing_v5.R --output                 # Save results to CSV files\n")
@@ -99,11 +98,7 @@ if (length(args) > 0) {
       EXCLUDE_TAXID <- as.numeric(args[i + 1])
       cat("Excluding taxID:", EXCLUDE_TAXID, "\n")
       i <- i + 2
-    } else if (args[i] == "--no-bracken") {
-      PROCESS_BRACKEN <- FALSE
-      cat("Skipping bracken processing\n")
-      i <- i + 1
-    } else if (args[i] == "--min-reads" && i < length(args)) {
+  } else if (args[i] == "--min-reads" && i < length(args)) {
       MIN_CLADE_READS <- as.numeric(args[i + 1])
       cat("Minimum clade reads set to:", MIN_CLADE_READS, "\n")
       i <- i + 2
@@ -175,6 +170,14 @@ if (length(args) > 0) {
   }
 }
 rm(i, show_help)
+
+# Decide whether to process bracken: enable only if at least one bracken directory was provided
+if (is.null(UNALIGNED_BRACKEN_DIR) && is.null(NONHUMAN_BRACKEN_DIR)) {
+  PROCESS_BRACKEN <- FALSE
+  cat("No bracken directories provided; skipping bracken processing\n")
+} else {
+  PROCESS_BRACKEN <- TRUE
+}
 
 # Display final configuration
 cat("\n=== Configuration ===\n")
@@ -854,7 +857,8 @@ parse_sample_metadata <- function(input_dir) {
       if (nrow(metadata) > 0) {
         metadata$sample <- sapply(metadata$sample, function(x) {
           sample_info <- parse_sample_info(x)
-          return(sample_info$trimmed_name)
+          # Remove _S and everything after to match runtime data
+          return(sub("(_S\\d+).*", "", sample_info$trimmed_name))
         })
       }
       
@@ -927,10 +931,10 @@ parse_runtime_files <- function(runtime_folder) {
       # Parse Cutadapt/STAR/Samtools runtime
       if (grepl("^Cutadapt/STAR/Samtools \\(.*\\); RT:", line)) {
         sample_match <- regmatches(line, regexpr("\\(([^)]+)\\)", line))
-        sample_name <- gsub("[()]", "", sample_match)
-        # Use parse_sample_info to get consistent trimmed name
-        sample_info <- parse_sample_info(sample_name)
-        sample_name <- sample_info$trimmed_name
+        sample_name_raw <- gsub("[()]", "", sample_match)
+        # Use parse_sample_info to get consistent trimmed name, then remove _S and everything after
+        sample_info <- parse_sample_info(sample_name_raw)
+        sample_name <- sub("(_S\\d+).*", "", sample_info$trimmed_name)
         rt_match <- regmatches(line, regexpr("RT: (\\d+) seconds", line))
         rt_seconds <- as.numeric(gsub("RT: | seconds", "", rt_match))        # Find existing row or create new one
         existing_row <- which(runtime_data$sample == sample_name)
@@ -955,10 +959,10 @@ parse_runtime_files <- function(runtime_folder) {
       # Parse Kraken2 unaligned runtime
       if (grepl("^Kraken2 unaligned \\(.*\\); RT:", line)) {
         sample_match <- regmatches(line, regexpr("\\(([^)]+)\\)", line))
-        sample_name <- gsub("[()]", "", sample_match)
-        # Use parse_sample_info to get consistent trimmed name
-        sample_info <- parse_sample_info(sample_name)
-        sample_name <- sample_info$trimmed_name
+        sample_name_raw <- gsub("[()]", "", sample_match)
+        # Use parse_sample_info to get consistent trimmed name, then remove _S and everything after
+        sample_info <- parse_sample_info(sample_name_raw)
+        sample_name <- sub("(_S\\d+).*", "", sample_info$trimmed_name)
         rt_match <- regmatches(line, regexpr("RT: (\\d+) seconds", line))
         rt_seconds <- as.numeric(gsub("RT: | seconds", "", rt_match))
         
@@ -971,13 +975,13 @@ parse_runtime_files <- function(runtime_folder) {
         } else {
           # Add new row
           new_row <- data.frame(
-            sample = sample_name,
-            cutadapt_star_samtools_rt = NA,
-            kraken2_unaligned_rt = rt_seconds,
-            kraken2_nonhuman_rt = NA,
-            is_first_k2_unaligned = first_k2_unaligned,
-            is_first_k2_nonhuman = FALSE,
-            stringsAsFactors = FALSE
+        sample = sample_name,
+        cutadapt_star_samtools_rt = NA,
+        kraken2_unaligned_rt = rt_seconds,
+        kraken2_nonhuman_rt = NA,
+        is_first_k2_unaligned = first_k2_unaligned,
+        is_first_k2_nonhuman = FALSE,
+        stringsAsFactors = FALSE
           )
           runtime_data <- rbind(runtime_data, new_row)
         }
@@ -992,10 +996,10 @@ parse_runtime_files <- function(runtime_folder) {
       # Parse Kraken2 non-human runtime
       if (grepl("^Kraken2 non-human \\(.*\\); RT:", line)) {
         sample_match <- regmatches(line, regexpr("\\(([^)]+)\\)", line))
-        sample_name <- gsub("[()]", "", sample_match)
-        # Use parse_sample_info to get consistent trimmed name
-        sample_info <- parse_sample_info(sample_name)
-        sample_name <- sample_info$trimmed_name
+        sample_name_raw <- gsub("[()]", "", sample_match)
+        # Use parse_sample_info to get consistent trimmed name, then remove _S and everything after
+        sample_info <- parse_sample_info(sample_name_raw)
+        sample_name <- sub("(_S\\d+).*", "", sample_info$trimmed_name)
         rt_match <- regmatches(line, regexpr("RT: (\\d+) seconds", line))
         rt_seconds <- as.numeric(gsub("RT: | seconds", "", rt_match))
         
@@ -1126,7 +1130,8 @@ parse_rrstats_files <- function(rrstats_folder) {
       if (nrow(rrstats_data) > 0) {
         rrstats_data$sample <- sapply(rrstats_data$sample, function(x) {
           sample_info <- parse_sample_info(x)
-          return(sample_info$trimmed_name)
+          # Remove _S and everything after to match runtime data
+          return(sub("(_S\\d+).*", "", sample_info$trimmed_name))
         })
       }
       

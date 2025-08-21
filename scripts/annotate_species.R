@@ -14,15 +14,29 @@ suppressPackageStartupMessages({
 # Source utils.R for run_as_script functionality
 source(here("scripts", "utils.R"))
 
-# Load databases
-epathogen_db <- read.csv(here("databases", "epathogen-2025-07-15-result.csv"), header = TRUE, stringsAsFactors = FALSE)
-HOMD_db <- read.table(here("databases", "HOMD_taxon_table2025-07-15_1752607154.xls"), header = TRUE, stringsAsFactors = FALSE, sep = "\t", fill = TRUE)
+# Load databases function (will be called with configurable path)
+load_databases <- function(databases_dir = here("Ranalysis", "databases")) {
+  cat("Loading databases from:", databases_dir, "\n")
+  
+  # Get latest epathogen database
+  epathogen_file <- get_latest_timestamped_file(database_type = "epathogen")
+  cat("Using epathogen database:", basename(epathogen_file), "\n")
+  epathogen_db <- read.csv(epathogen_file, header = TRUE, stringsAsFactors = FALSE)
+  
+  # Get latest HOMD database
+  HOMD_file <- get_latest_timestamped_file(database_type = "HOMD")
+  cat("Using HOMD database:", basename(HOMD_file), "\n")
+  HOMD_db <- read.table(HOMD_file, header = TRUE, stringsAsFactors = FALSE, sep = "\t", fill = TRUE)
+  
+  return(list(epathogen_db = epathogen_db, HOMD_db = HOMD_db))
+}
 
 #' Annotate species with Risk Groups from epathogen database
 #' 
 #' @param df Input dataframe with 'name' and 'taxID' columns
+#' @param epathogen_db Epathogen database dataframe
 #' @return Dataframe with additional 'RiskGroup' column
-annotate_risk_groups <- function(df) {
+annotate_risk_groups <- function(df, epathogen_db) {
   
   # Validate required columns
   required_cols <- c("name", "taxID")
@@ -94,8 +108,9 @@ annotate_risk_groups <- function(df) {
 #' Annotate species with HOMD classifications
 #' 
 #' @param df Input dataframe with 'taxID' column and existing annotations
+#' @param HOMD_db HOMD database dataframe
 #' @return Dataframe with additional 'HOMD' and 'HOMD.Category' columns
-annotate_homd <- function(df) {
+annotate_homd <- function(df, HOMD_db) {
   
   cat("Annotating HOMD classifications...\n")
   cat("HOMD database contains", nrow(HOMD_db), "entries\n")
@@ -155,17 +170,21 @@ annotate_homd <- function(df) {
 #' Process dataframe with complete species annotation
 #' 
 #' @param df Input dataframe with 'name' and 'taxID' columns
+#' @param databases_dir Path to databases directory
 #' @return Annotated dataframe with RiskGroup, HOMD, and HOMD.Category columns
-process_species_annotation <- function(df) {
+process_species_annotation <- function(df, databases_dir = here("Ranalysis", "databases")) {
   
   cat("Starting species annotation process...\n")
   cat("Input dataframe has", nrow(df), "rows\n")
   
+  # Load databases
+  dbs <- load_databases(databases_dir)
+  
   # Annotate risk groups
-  df_annotated <- annotate_risk_groups(df)
+  df_annotated <- annotate_risk_groups(df, dbs$epathogen_db)
   
   # Annotate HOMD
-  df_annotated <- annotate_homd(df_annotated)
+  df_annotated <- annotate_homd(df_annotated, dbs$HOMD_db)
   
   cat("Species annotation completed successfully!\n")
   
@@ -182,6 +201,7 @@ parse_arguments <- function() {
   config <- list(
     df = NULL,
     output = NULL,
+    databases_dir = here("Ranalysis", "databases"),
     help = FALSE
   )
   
@@ -208,6 +228,13 @@ parse_arguments <- function() {
         } else {
           stop("--output requires an argument")
         }
+      } else if (arg == "--databases-dir") {
+        if (i + 1 <= length(args)) {
+          i <- i + 1
+          config$databases_dir <- args[i]
+        } else {
+          stop("--databases-dir requires an argument")
+        }
       } else {
         warning(paste("Unknown argument:", arg))
       }
@@ -227,6 +254,8 @@ show_help <- function() {
   cat("                            Must have 'name' and 'taxID' columns\n")
   cat("  --output <object>         R object name to store the annotated result\n")
   cat("                            (default: annotated_species)\n")
+  cat("  --databases-dir <DIR>     Path to databases directory\n")
+  cat("                            (default: Ranalysis/databases)\n")
   cat("  --help, -h               Show this help message\n\n")
   cat("Description:\n")
   cat("  This script annotates species with:\n")
@@ -237,6 +266,10 @@ show_help <- function() {
   cat("  The input dataframe must contain:\n")
   cat("  - 'name': Species name column\n")
   cat("  - 'taxID': Taxonomy ID column\n\n")
+  cat("Database Files:\n")
+  cat("  The script automatically finds the latest timestamped database files:\n")
+  cat("  - epathogen*.csv files for risk group annotation\n")
+  cat("  - HOMD_taxon_table*.xls files for HOMD classification\n\n")
   cat("Examples:\n")
   cat("  run_as_script(here('scripts', 'annotate_species.R'), '--df', 'my_species_data')\n")
   cat("  run_as_script(here('scripts', 'annotate_species.R'), '--df', 'species_list', '--output', 'annotated_data')\n\n")
@@ -274,7 +307,7 @@ main <- function(args = NULL) {
   
   # Process annotation
   cat("Processing species annotation...\n")
-  annotated_df <- process_species_annotation(df)
+  annotated_df <- process_species_annotation(df, args$databases_dir)
   
   # Store result in global environment
   output_name <- if (!is.null(args$output)) args$output else "annotated_species"
@@ -299,5 +332,4 @@ if ("--help" %in% args || "-h" %in% args) {
 main()
 
 rm(args)
-rm(epathogen_db, HOMD_db)  # Clean up loaded databases
 
