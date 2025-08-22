@@ -285,172 +285,6 @@ create_summary_plot <- function(df, sample_name = "All Samples") {
   return(summary_plot)
 }
 
-#' Create Per-Sample Distinct Minimizer Plots
-#' 
-#' @param merged_long_df Input merged_long dataframe with distinct_minimizers per sample
-#' @param annotation_df Dataframe with annotation columns (RiskGroup, HOMD.Category)
-#' @param plot_type Plot type to determine category column and colors
-#' @param output_dir Directory to save individual sample plots
-#' @param top_n Number of top species to show per sample (default: 30)
-#' @param log Whether to create log-transformed plots (default: FALSE)
-#' @return List of ggplot objects (one per sample)
-create_per_sample_minimizer_plots <- function(merged_long_df, annotation_df, plot_type = "risk_group", output_dir = NULL, top_n = 30, log = FALSE) {
-  
-  # Validate inputs
-  required_cols <- c("sample", "taxID", "name", "distinct_minimizers", "cladeReads")
-  missing_cols <- setdiff(required_cols, colnames(merged_long_df))
-  if (length(missing_cols) > 0) {
-  stop(paste("Missing required columns in merged_long:", paste(missing_cols, collapse = ", ")))
-  }
-  
-  # Determine category column and colors based on plot_type
-  if (plot_type == "risk_group") {
-  category_col <- "RiskGroup"
-  plot_colors <- category_colors
-  plot_title_prefix <- "Species by Risk Group"
-  } else if (plot_type == "homd") {
-  category_col <- "HOMD.Category"
-  plot_colors <- c(
-    "Pathogen" = "#E53935",      # Red
-    "Opportunist" = "#FF9800",   # Orange
-    "Microbiome" = "#4CAF50",    # Green
-    "NotAnnotated" = "#9E9E9E"   # Gray
-  )
-  plot_title_prefix <- "Species by HOMD Category"
-  } else if (plot_type == "kingdom") {
-  category_col <- "kingdom"
-  plot_title_prefix <- "Species by Kingdom"
-  # Kingdom colors will be set dynamically per sample
-  } else {
-  stop("plot_type must be one of: risk_group, homd, kingdom")
-  }
-  
-  # Join annotation data with merged_long
-  if (plot_type == "kingdom") {
-  # Add kingdom extraction for annotation_df if not present
-  if (!"kingdom" %in% colnames(annotation_df) && "taxLineage" %in% colnames(annotation_df)) {
-    annotation_df <- annotation_df %>%
-    mutate(kingdom = case_when(
-      str_detect(taxLineage, "^r_root\\|k_") ~ str_extract(taxLineage, "(?<=r_root\\|k_)[^|]+"),
-      TRUE ~ "Other non-kingdom roots"
-    ))
-  }
-  }
-  
-  plot_data <- merged_long_df %>%
-  left_join(annotation_df %>% select(taxID, all_of(category_col)), by = "taxID") %>%
-  filter(!is.na(distinct_minimizers), distinct_minimizers > 0)
-  
-  # Get unique samples
-  samples <- unique(plot_data$sample)
-  cat("Creating plots for", length(samples), "samples\n")
-  
-  # Create plots for each sample
-  plot_list <- list()
-  
-  for (sample_id in samples) {
-  cat("Processing sample:", sample_id, "\n")
-  
-  # Filter data for current sample and sort by cladeReads
-  sample_data <- plot_data %>%
-    filter(sample == sample_id) %>%
-    arrange(desc(cladeReads)) %>%
-    slice_head(n = top_n)
-  
-  if (nrow(sample_data) == 0) {
-    cat("Warning: No data for sample", sample_id, "\n")
-    next
-  }
-  
-  # Handle kingdom colors dynamically
-  if (plot_type == "kingdom") {
-    unique_kingdoms <- unique(sample_data[[category_col]])
-    kingdom_color_palette <- c(
-    "#2E8B57", "#FF6347", "#4169E1", "#DAA520", "#8B4513",
-    "#9370DB", "#20B2AA", "#CD853F", "#B22222", "#4682B4", "#808080"
-    )
-    if ("Other non-kingdom roots" %in% unique_kingdoms) {
-    other_kingdoms <- unique_kingdoms[unique_kingdoms != "Other non-kingdom roots"]
-    ordered_kingdoms <- c(other_kingdoms, "Other non-kingdom roots")
-    plot_colors <- setNames(kingdom_color_palette[seq_along(ordered_kingdoms)], ordered_kingdoms)
-    } else {
-    plot_colors <- setNames(kingdom_color_palette[seq_along(unique_kingdoms)], unique_kingdoms)
-    }
-  }
-  
-  # Prepare data for plotting
-  sample_data <- sample_data %>%
-    mutate(
-    name = make.unique(as.character(name)),  # Ensure unique names
-    name_f = factor(name, levels = rev(name))  # Reverse for proper ordering in coord_flip
-    ) %>%
-    select(name, name_f, distinct_minimizers, cladeReads, category = all_of(category_col)) %>%
-    pivot_longer(cols = c(distinct_minimizers, cladeReads), 
-           names_to = "metric", 
-           values_to = "count") %>%
-    mutate(
-    category = factor(category, levels = names(plot_colors)),
-    metric = factor(metric, levels = c("cladeReads", "distinct_minimizers"))
-    )
-  
-  # Apply log transformation if requested
-  if (log) {
-    sample_data <- sample_data %>%
-    mutate(count = log1p(count))
-    y_label <- "Log(Count + 1)"
-  } else {
-    y_label <- "Count"
-  }
-  
-  # Create grouped bar chart
-  sample_plot <- ggplot(sample_data, aes(x = name_f, y = count, fill = metric)) +
-    geom_bar(stat = "identity", position = position_dodge(width = 0.8), alpha = 0.8) +
-    scale_fill_manual(name = "Metric", values = c("cladeReads" = "#1E88E5", "distinct_minimizers" = "#FFC107")) +
-    labs(
-    title = paste(plot_title_prefix, "-", sample_id),
-    subtitle = paste("Top", min(top_n, nrow(sample_data)), "species by Metric"),
-    x = "Species",
-    y = y_label
-    ) +
-    my_ggplot_theme +
-    theme(
-    legend.position = "right",
-    plot.background = element_blank(),
-    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 8),
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(),
-    panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
-    axis.text.y = element_text(size = 10, color = "black"),
-    strip.text = element_text(size = 12, face = "bold")
-    ) +
-    coord_flip()
-  
-  # Store plot
-  plot_list[[sample_id]] <- sample_plot
-  
-  # Save individual plot if output directory specified
-  if (!is.null(output_dir)) {
-    if (!dir.exists(output_dir)) {
-    dir.create(output_dir, recursive = TRUE)
-    }
-    
-    plot_filename <- file.path(output_dir, paste0("distinct_minimizers_", plot_type, "_", sample_id, ".pdf"))
-    ggsave(
-    filename = plot_filename,
-    plot = sample_plot,
-    width = 12,
-    height = 10,  # Increased height for grouped bar chart
-    device = "pdf"
-    )
-    cat("Saved plot for sample", sample_id, "to", plot_filename, "\n")
-  }
-  }
-  
-  cat("Created", length(plot_list), "plots\n")
-  return(plot_list)
-}
-
-
 #' Create Detailed Species Plot
 #' 
 #' @param df Input dataframe with annotation and value columns
@@ -527,13 +361,9 @@ create_detailed_plot <- function(df, detailed_col, plot_type, sample_name = "All
     )
   
   # Create the detailed plot as a bar chart similar to the attached image
-  if (log) {
-    plot_data <- plot_data %>%
-      mutate(!!sym(detailed_col) := log1p(!!sym(detailed_col)))
-    y_label <- paste("Log(", detailed_col, " + 1)", sep = "")
-  } else {
-    y_label <- detailed_col
-  }
+  # Always apply log10(x + 1) transform to avoid -Inf and handle zeros
+  plot_data[[detailed_col]] <- log10(plot_data[[detailed_col]] + 1)
+  y_label <- paste0("Log10(", detailed_col, " + 1)")
   
   detailed_plot <- ggplot(plot_data, aes(x = name_f, y = get(detailed_col), fill = category)) +
     geom_bar(stat = "identity") +
@@ -574,11 +404,7 @@ parse_arguments <- function() {
     width = 12,
     height = 8,
     help = FALSE,
-    per_sample = FALSE,
-    merged_long_df = NULL,
-    annotation_df = NULL,
     top_n = 30,
-    output_dir = NULL,
     log = FALSE
   )
   
@@ -640,35 +466,12 @@ parse_arguments <- function() {
         } else {
           stop("--height requires an argument")
         }
-      } else if (arg == "--per-sample") {
-        config$per_sample <- TRUE
-      } else if (arg == "--merged-long-df") {
-        if (i + 1 <= length(args)) {
-          i <- i + 1
-          config$merged_long_df <- args[i]
-        } else {
-          stop("--merged-long-df requires an argument")
-        }
-      } else if (arg == "--annotation-df") {
-        if (i + 1 <= length(args)) {
-          i <- i + 1
-          config$annotation_df <- args[i]
-        } else {
-          stop("--annotation-df requires an argument")
-        }
       } else if (arg == "--top-n") {
         if (i + 1 <= length(args)) {
           i <- i + 1
           config$top_n <- as.numeric(args[i])
         } else {
           stop("--top-n requires an argument")
-        }
-      } else if (arg == "--output-dir") {
-        if (i + 1 <= length(args)) {
-          i <- i + 1
-          config$output_dir <- args[i]
-        } else {
-          stop("--output-dir requires an argument")
         }
       } else if (arg == "--log") {
         config$log <- TRUE
@@ -697,11 +500,7 @@ show_help <- function() {
   cat("  --output <file>           Output PDF file path (default: display in R environment)\n")
   cat("  --width <number>          Plot width in inches (default: 12)\n")
   cat("  --height <number>         Plot height in inches (default: 8)\n")
-  cat("  --per-sample              Generate per-sample plots using distinct_minimizers column\n")
-  cat("  --merged-long-df <obj>    R object name containing merged_long dataframe (required for --per-sample)\n")
-  cat("  --annotation-df <obj>     R object name containing annotation dataframe (required for --per-sample)\n")
-  cat("  --top-n <number>          Number of top species to show per sample (default: 30)\n")
-  cat("  --output-dir <dir>        Directory to save individual sample plots (for --per-sample)\n")
+  cat("  --top-n <number>          Number of top species to show (default: 30)\n")
   cat("  --log                     Create log-transformed plots (default: FALSE)\n")
   cat("  --help, -h               Show this help message\n\n")
   cat("Plot Types:\n")
@@ -709,35 +508,22 @@ show_help <- function() {
   cat("  homd:                    Bar chart showing species counts by HOMD Category\n")
   cat("  kingdom:                 Bar chart showing species counts by taxonomic kingdom\n")
   cat("  summary:                 Summary plot with annotation statistics\n\n")
-  cat("Per-Sample Mode:\n")
-  cat("  When --per-sample is used, creates individual plots for each sample showing\n")
-  cat("  distinct_minimizers values per species, colored by the specified category\n")
-  cat("  Requires --merged-long-df and --annotation-df arguments\n\n")
   cat("Detailed Plot:\n")
   cat("  When --detailed is used, creates a scatter plot showing individual species\n")
   cat("  ranked by the specified column value and colored by category\n")
   cat("  (similar to reportRanalysis.R style)\n\n")
   cat("Input Requirements:\n")
-  cat("  Standard plots - The input dataframe must contain:\n")
+  cat("  The input dataframe must contain:\n")
   cat("  - 'name': Species name column\n")
   cat("  - 'taxID': Taxonomy ID column\n")
   cat("  - 'RiskGroup': Risk group annotation from annotate_species.R\n")
   cat("  - 'HOMD.Category': HOMD category annotation from annotate_species.R\n")
   cat("  - 'taxLineage': Taxonomic lineage (for kingdom plots)\n\n")
-  cat("  Per-sample plots - The merged_long dataframe must contain:\n")
-  cat("  - 'sample': Sample ID column\n")
-  cat("  - 'taxID': Taxonomy ID column\n")
-  cat("  - 'name': Species name column\n")
-  cat("  - 'distinct_minimizers': Distinct minimizer counts per sample\n\n")
   cat("Examples:\n")
-  cat("  Standard plots:\n")
   cat("  run_as_script(here('scripts', 'annotate_species_plots.R'), '--df', 'annotated_species')\n")
   cat("  run_as_script(here('scripts', 'annotate_species_plots.R'), '--df', 'my_data', '--plot-type', 'homd')\n")
   cat("  run_as_script(here('scripts', 'annotate_species_plots.R'), '--df', 'my_data', '--plot-type', 'kingdom')\n")
   cat("  run_as_script(here('scripts', 'annotate_species_plots.R'), '--df', 'my_data', '--plot-type', 'homd', '--detailed', 'Frequency')\n\n")
-  cat("  Per-sample plots:\n")
-  cat("  run_as_script(here('scripts', 'annotate_species_plots.R'), '--per-sample', '--merged-long-df', 'merged_long', '--annotation-df', 'annotated_species', '--plot-type', 'risk_group')\n")
-  cat("  run_as_script(here('scripts', 'annotate_species_plots.R'), '--per-sample', '--merged-long-df', 'merged_long', '--annotation-df', 'annotated_species', '--plot-type', 'homd', '--output-dir', 'sample_plots')\n\n")
 }
 
 #' Main function to orchestrate plot generation
@@ -757,20 +543,10 @@ main <- function(args = NULL) {
   }
   
   # Validate required arguments
-  if (args$per_sample) {
-    # Per-sample mode validation
-    if (is.null(args$merged_long_df) || is.null(args$annotation_df)) {
-      cat("Error: --per-sample mode requires both --merged-long-df and --annotation-df arguments.\n\n")
-      show_help()
-      stop("Missing required arguments for per-sample mode")
-    }
-  } else {
-    # Standard mode validation
-    if (is.null(args$df)) {
-      cat("Error: --df argument is required for standard plots.\n\n")
-      show_help()
-      stop("Missing required arguments")
-    }
+  if (is.null(args$df)) {
+    cat("Error: --df argument is required for plots.\n\n")
+    show_help()
+    stop("Missing required arguments")
   }
   
   # Validate plot type
@@ -781,62 +557,6 @@ main <- function(args = NULL) {
     stop("Invalid plot type")
   }
   
-  # Handle per-sample mode
-  if (args$per_sample) {
-    cat("Running in per-sample mode\n")
-    
-    # Get dataframes from environment
-    cat("Loading merged_long dataframe from object:", args$merged_long_df, "\n")
-    
-    # Handle nested object access (e.g., unaligned_results$merged_long)
-    if (grepl("\\$", args$merged_long_df)) {
-      parts <- strsplit(args$merged_long_df, "\\$")[[1]]
-      if (length(parts) == 2) {
-        base_obj <- parts[1]
-        nested_obj <- parts[2]
-        if (!exists(base_obj, envir = .GlobalEnv)) {
-          stop(paste("Object", base_obj, "not found in environment"))
-        }
-        base_data <- get(base_obj, envir = .GlobalEnv)
-        if (!nested_obj %in% names(base_data)) {
-          stop(paste("Component", nested_obj, "not found in", base_obj))
-        }
-        merged_long_df <- base_data[[nested_obj]]
-      } else {
-        stop(paste("Invalid nested object format:", args$merged_long_df))
-      }
-    } else {
-      if (!exists(args$merged_long_df, envir = .GlobalEnv)) {
-        stop(paste("Object", args$merged_long_df, "not found in environment"))
-      }
-      merged_long_df <- get(args$merged_long_df, envir = .GlobalEnv)
-    }
-    
-    cat("Loading annotation dataframe from object:", args$annotation_df, "\n")
-    if (!exists(args$annotation_df, envir = .GlobalEnv)) {
-      stop(paste("Object", args$annotation_df, "not found in environment"))
-    }
-    annotation_df <- get(args$annotation_df, envir = .GlobalEnv)
-    
-    # Create per-sample plots
-    plot_result <- create_per_sample_minimizer_plots(
-      merged_long_df = merged_long_df,
-      annotation_df = annotation_df,
-      plot_type = args$plot_type,
-      output_dir = args$output_dir,
-      top_n = args$top_n,
-      log = T
-    )
-    
-    # Store results in global environment
-    plot_var_name <- paste0("per_sample_", args$plot_type, "_plots")
-    assign(plot_var_name, plot_result, envir = .GlobalEnv)
-    cat("Per-sample plots stored as:", plot_var_name, "\n")
-    
-    return(plot_result)
-  }
-  
-  # Standard mode - existing functionality
   # Get dataframe from environment
   cat("Loading input dataframe from object:", args$df, "\n")
   if (!exists(args$df, envir = .GlobalEnv)) {
@@ -925,76 +645,41 @@ main <- function(args = NULL) {
 
 #' Example usage function for interactive mode
 #' 
-#' @param df Input annotated dataframe (for standard plots)
+#' @param df Input annotated dataframe
 #' @param plot_type Type of plot to generate
 #' @param detailed Optional column name for detailed plot
-#' @param per_sample Whether to create per-sample plots
-#' @param merged_long_df Input merged_long dataframe (for per-sample plots)
-#' @param annotation_df Input annotation dataframe (for per-sample plots)
 #' @return ggplot object or list of ggplot objects
-example_usage <- function(df = NULL, plot_type = "risk_group", detailed = NULL, 
-                         per_sample = FALSE, merged_long_df = NULL, annotation_df = NULL) {
+example_usage <- function(df = NULL, plot_type = "risk_group", detailed = NULL) {
   
-  if (per_sample) {
-    # Per-sample mode
-    if (is.null(merged_long_df) || is.null(annotation_df)) {
-      stop("per_sample mode requires both merged_long_df and annotation_df arguments")
-    }
-    
-    # Store objects in global environment for run_as_script to access
-    assign("my_merged_long_data", merged_long_df, envir = .GlobalEnv)
-    assign("my_annotation_data", annotation_df, envir = .GlobalEnv)
-    
-    # Build arguments
-    args_list <- c(
-      "--per-sample",
-      "--merged-long-df", "my_merged_long_data",
-      "--annotation-df", "my_annotation_data",
-      "--plot-type", plot_type
-    )
-    
-    # Use run_as_script to call the plotting script
-    run_as_script(
-      here("scripts", "annotate_species_plots.R"),
-      args_list
-    )
-    
-    # Return the generated plots
-    plot_var_name <- paste0("per_sample_", plot_type, "_plots")
-    return(get(plot_var_name, envir = .GlobalEnv))
-    
-  } else {
-    # Standard mode - existing functionality
-    if (is.null(df)) {
-      stop("Standard mode requires df argument")
-    }
-    
-    # Store object in global environment for run_as_script to access
-    assign("my_annotated_data", df, envir = .GlobalEnv)
-    
-    # Build arguments
-    args_list <- c(
-      "--df", "my_annotated_data",
-      "--plot-type", plot_type
-    )
-    
-    if (!is.null(detailed)) {
-      args_list <- c(args_list, "--detailed", detailed)
-    }
-    
-    # Use run_as_script to call the plotting script
-    run_as_script(
-      here("scripts", "annotate_species_plots.R"),
-      args_list
-    )
-    
-    # Return the generated plot
-    plot_var_name <- paste0(plot_type, "_plot")
-    if (!is.null(detailed)) {
-      plot_var_name <- paste0("detailed_", plot_type, "_plot")
-    }
-    return(get(plot_var_name, envir = .GlobalEnv))
+  if (is.null(df)) {
+    stop("Standard mode requires df argument")
   }
+  
+  # Store object in global environment for run_as_script to access
+  assign("my_annotated_data", df, envir = .GlobalEnv)
+    
+  # Build arguments
+  args_list <- c(
+    "--df", "my_annotated_data",
+    "--plot-type", plot_type
+  )
+  
+  if (!is.null(detailed)) {
+    args_list <- c(args_list, "--detailed", detailed)
+  }
+  
+  # Use run_as_script to call the plotting script
+  run_as_script(
+    here("scripts", "annotate_species_plots.R"),
+    args_list
+  )
+  
+  # Return the generated plot
+  plot_var_name <- paste0(plot_type, "_plot")
+  if (!is.null(detailed)) {
+    plot_var_name <- paste0("detailed_", plot_type, "_plot")
+  }
+  return(get(plot_var_name, envir = .GlobalEnv))
 }
 
 # ============================================================================

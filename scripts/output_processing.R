@@ -71,7 +71,7 @@ options(scipen = 999)
 # Configuration variables with default values
 MIN_CLADE_READS <- 0
 EXCLUDE_TAXID <- NULL  # Set to NULL by default (no exclusion)
-TOP_SPECIES_N <- 3
+TOP_SPECIES_N <- 10
 PROCESS_BRACKEN <- TRUE   # Set to TRUE to enable bracken processing by default
 SAVE_OUTPUT <- FALSE  # Set to FALSE to skip saving CSV files
 ADD_PARAMS <- FALSE  # Set to FALSE to skip adding parameter columns
@@ -659,6 +659,8 @@ process_bracken_folder <- function(bracken_folder) {
     bracken_combined <- tibble()
   }
   
+  bracken_combined <- bracken_combined %>% mutate(name = str_remove_all(name, "'"))  # remove apostrophes
+  
   return(bracken_combined)
 }
 
@@ -670,6 +672,14 @@ merge_data <- function(kreports_data, bracken_data = NULL, add_params = ADD_PARA
       full_join(bracken_data, by = c("name", "taxID"))
   } else {
     merged_data <- kreports_data
+  }
+  
+  # Check for duplicate taxIDs
+  duplicate_taxids <- merged_data %>% 
+      count(taxID) %>% 
+      filter(n > 1)
+  if (nrow(duplicate_taxids) > 0) {
+    warning("Duplicate taxIDs found: ", paste(duplicate_taxids$taxID, collapse = ", "))
   }
   
   # Reorder columns
@@ -728,19 +738,34 @@ add_summary_stats <- function(merged_data) {
   result <- merged_data
   
   if (length(cladeReads_cols) > 0) {
+    # Create numeric matrix of cladeReads columns
+    clade_mat <- as.matrix(select(result, all_of(cladeReads_cols)))
+    # Compute row means and max while ignoring NA; if all NA, return NA
+    clade_means <- rowMeans(clade_mat, na.rm = TRUE)
+    clade_maxs <- apply(clade_mat, 1, function(x) if (all(is.na(x))) 0 else max(x, na.rm = TRUE))
     result <- result %>%
       mutate(
-        cladeReads_mean = rowMeans(select(., all_of(cladeReads_cols)), na.rm = TRUE),
-        cladeReads_max = apply(select(., all_of(cladeReads_cols)), 1, max, na.rm = TRUE)
+        cladeReads_mean = clade_means,
+        cladeReads_max  = clade_maxs
       )
   }
   
   if (length(bracken_reads_cols) > 0) {
+    # Extract matrix of bracken read columns
+    bracken_mat <- as.matrix(select(result, all_of(bracken_reads_cols)))
+    # Compute row means, replace NaN/NA (all-NA rows) with 0
+    bracken_means <- rowMeans(bracken_mat, na.rm = TRUE)
+    bracken_means[is.nan(bracken_means) | is.na(bracken_means)] <- 0
+    # Compute row max, return 0 when all values are NA
+    bracken_max <- apply(bracken_mat, 1, function(x) {
+      if (all(is.na(x))) 0 else max(x, na.rm = TRUE)
+    })
     result <- result %>%
       mutate(
-        bracken_reads_mean = rowMeans(select(., all_of(bracken_reads_cols)), na.rm = TRUE),
-        bracken_reads_max = apply(select(., all_of(bracken_reads_cols)), 1, max, na.rm = TRUE)
+        bracken_reads_mean = bracken_means,
+        bracken_reads_max  = bracken_max
       )
+    cat("Added bracken summary statistics: bracken_reads_mean, bracken_reads_max\n")
   }
   
   return(result)
@@ -748,7 +773,7 @@ add_summary_stats <- function(merged_data) {
 
 # Function to get complete species list with topN frequency included
 get_species_list_with_frequency <- function(merged_data, count_column_pattern = "_cladeReads$", 
-                                            top_n = 10, exclude_taxid = NULL) {
+                                            top_n) {
   count_cols <- grep(count_column_pattern, colnames(merged_data), value = TRUE)
   
   if (length(count_cols) == 0) {
@@ -763,19 +788,9 @@ get_species_list_with_frequency <- function(merged_data, count_column_pattern = 
     ))
   }
   
-  # Apply taxID exclusion only if exclude_taxid is specified
-  if (!is.null(exclude_taxid)) {
-    filtered_data <- merged_data %>%
-      filter(taxID != exclude_taxid)
-    cat("Excluding taxID", exclude_taxid, "from species list\n")
-  } else {
-    filtered_data <- merged_data
-    cat("No taxID exclusion applied in species list\n")
-  }
-  
   # Get top species from each sample
   top_species_list <- map_dfr(count_cols, function(sample_col) {
-    temp_df <- filtered_data %>%
+    temp_df <- merged_data %>%
       select(name, taxID, taxRank, taxLineage, count = all_of(sample_col)) %>%
       arrange(desc(count)) %>%
       slice_head(n = top_n)
@@ -789,7 +804,7 @@ get_species_list_with_frequency <- function(merged_data, count_column_pattern = 
     filter(topN_freq >= 1)
   
   # Create complete species list with same format but include topN frequency
-  complete_list_df <- filtered_data %>%
+  complete_list_df <- merged_data %>%
     select(name, taxID, taxRank, taxLineage) %>%
     distinct() %>%
     left_join(top_species_freq, by = "taxID") %>%
@@ -798,17 +813,28 @@ get_species_list_with_frequency <- function(merged_data, count_column_pattern = 
     arrange(desc(Freq), name)
   
   # Add cladeReads_mean and cladeReads_max if they exist in the data
-  if ("cladeReads_mean" %in% colnames(filtered_data) && "cladeReads_max" %in% colnames(filtered_data)) {
-    # Get the mean and max values for each species
-    summary_stats <- filtered_data %>%
-      select(taxID, cladeReads_mean, cladeReads_max) %>%
+  if ("cladeReads_mean" %in% colnames(merged_data) && "cladeReads_max" %in% colnames(merged_data)) {
+    # Get unique mean and max values for each species
+    summary_stats <- merged_data %>% select(taxID, cladeReads_mean, cladeReads_max) %>%
       distinct()
-    
     # Join with the species list
     complete_list_df <- complete_list_df %>%
       left_join(summary_stats, by = "taxID")
   }
   
+  # Add bracken_reads_mean and bracken_reads_max if they exist in the data
+  if ("bracken_reads_mean" %in% colnames(merged_data) && "bracken_reads_max" %in% colnames(merged_data)) {
+    # Get unique bracken mean and max values for each species
+    bracken_stats <- merged_data %>% select(taxID, bracken_reads_mean, bracken_reads_max) %>%
+      distinct()
+
+    # Join with the species list
+    complete_list_df  <- complete_list_df %>%
+      left_join(bracken_stats, by = "taxID")
+    
+    cat("Added bracken statistics to species list: bracken_reads_mean, bracken_reads_max\n")
+  }
+
   return(complete_list_df)
 }
 
@@ -909,7 +935,7 @@ parse_runtime_files <- function(runtime_folder) {
     cat("Processing runtime file:", basename(runtime_file), "\n")
     
     # Read the file
-    lines <- readLines(runtime_file, warn = FALSE)
+    lines <- readLines(runtime_file, warn = FALSE)  # Suppress incomplete final line warnings
     
     # Initialize data structures for this file
     runtime_data <- data.frame(
@@ -936,7 +962,8 @@ parse_runtime_files <- function(runtime_folder) {
         sample_info <- parse_sample_info(sample_name_raw)
         sample_name <- sub("(_S\\d+).*", "", sample_info$trimmed_name)
         rt_match <- regmatches(line, regexpr("RT: (\\d+) seconds", line))
-        rt_seconds <- as.numeric(gsub("RT: | seconds", "", rt_match))        # Find existing row or create new one
+        rt_text <- gsub("RT: | seconds", "", rt_match)
+        rt_seconds <- if (length(rt_text) > 0 && rt_text != "") as.numeric(rt_text) else NA_real_        # Find existing row or create new one
         existing_row <- which(runtime_data$sample == sample_name)
         if (length(existing_row) > 0) {
           # Update existing row (take latest runtime)
@@ -964,7 +991,8 @@ parse_runtime_files <- function(runtime_folder) {
         sample_info <- parse_sample_info(sample_name_raw)
         sample_name <- sub("(_S\\d+).*", "", sample_info$trimmed_name)
         rt_match <- regmatches(line, regexpr("RT: (\\d+) seconds", line))
-        rt_seconds <- as.numeric(gsub("RT: | seconds", "", rt_match))
+        rt_text <- gsub("RT: | seconds", "", rt_match)
+        rt_seconds <- if (length(rt_text) > 0 && rt_text != "") as.numeric(rt_text) else NA_real_
         
         # Find existing row or create new one
         existing_row <- which(runtime_data$sample == sample_name)
@@ -1001,7 +1029,8 @@ parse_runtime_files <- function(runtime_folder) {
         sample_info <- parse_sample_info(sample_name_raw)
         sample_name <- sub("(_S\\d+).*", "", sample_info$trimmed_name)
         rt_match <- regmatches(line, regexpr("RT: (\\d+) seconds", line))
-        rt_seconds <- as.numeric(gsub("RT: | seconds", "", rt_match))
+        rt_text <- gsub("RT: | seconds", "", rt_match)
+        rt_seconds <- if (length(rt_text) > 0 && rt_text != "") as.numeric(rt_text) else NA_real_
         
         # Find existing row or create new one
         existing_row <- which(runtime_data$sample == sample_name)
@@ -1044,18 +1073,19 @@ parse_runtime_files <- function(runtime_folder) {
     # If there are duplicates (same sample from multiple files), keep the latest values
     # Group by sample and take the non-NA values, preferring later files
     # For boolean flags, use OR logic (TRUE if any file marks it as first)
-    suppressWarnings({
-      final_runtime <- combined_runtime %>%
-        group_by(sample) %>%
-        summarise(
-          cutadapt_star_samtools_rt = last(cutadapt_star_samtools_rt[!is.na(cutadapt_star_samtools_rt)]),
-          kraken2_unaligned_rt = last(kraken2_unaligned_rt[!is.na(kraken2_unaligned_rt)]),
-          kraken2_nonhuman_rt = last(kraken2_nonhuman_rt[!is.na(kraken2_nonhuman_rt)]),
-          is_first_k2_unaligned = any(is_first_k2_unaligned, na.rm = TRUE),
-          is_first_k2_nonhuman = any(is_first_k2_nonhuman, na.rm = TRUE),
-          .groups = 'drop'
-        )
-    })
+    final_runtime <- combined_runtime %>%
+      group_by(sample) %>%
+      summarise(
+        cutadapt_star_samtools_rt = ifelse(length(cutadapt_star_samtools_rt[!is.na(cutadapt_star_samtools_rt)]) > 0,
+                                           last(cutadapt_star_samtools_rt[!is.na(cutadapt_star_samtools_rt)]), NA_real_),
+        kraken2_unaligned_rt = ifelse(length(kraken2_unaligned_rt[!is.na(kraken2_unaligned_rt)]) > 0,
+                                      last(kraken2_unaligned_rt[!is.na(kraken2_unaligned_rt)]), NA_real_),
+        kraken2_nonhuman_rt = ifelse(length(kraken2_nonhuman_rt[!is.na(kraken2_nonhuman_rt)]) > 0,
+                                     last(kraken2_nonhuman_rt[!is.na(kraken2_nonhuman_rt)]), NA_real_),
+        is_first_k2_unaligned = any(is_first_k2_unaligned, na.rm = TRUE),
+        is_first_k2_nonhuman = any(is_first_k2_nonhuman, na.rm = TRUE),
+        .groups = 'drop'
+      )
     
     return(final_runtime)
   } else {
@@ -1111,10 +1141,12 @@ parse_rrstats_files <- function(rrstats_folder) {
       
       for (col in numeric_cols) {
         if (col %in% colnames(rrstats_data)) {
-          # Suppress coercion warnings and handle them properly
-          suppressWarnings({
-            rrstats_data[[col]] <- as.numeric(as.character(rrstats_data[[col]]))
-          })
+          # Convert to numeric with proper error handling
+          numeric_vals <- as.numeric(as.character(rrstats_data[[col]]))
+          if (any(is.na(numeric_vals) & !is.na(rrstats_data[[col]]))) {
+            cat("Note: Some non-numeric values found in column", col, "and converted to NA\n")
+          }
+          rrstats_data[[col]] <- numeric_vals
         }
       }
       
@@ -1152,21 +1184,27 @@ parse_rrstats_files <- function(rrstats_folder) {
     combined_rrstats <- combined_rrstats[!is.na(combined_rrstats$sample) & combined_rrstats$sample != "", ]
     
     # If there are duplicates (same sample from multiple files), keep the latest values
-    suppressWarnings({
-      final_rrstats <- combined_rrstats %>%
-        group_by(sample) %>%
-        summarise(
-          num_input_reads = last(num_input_reads[!is.na(num_input_reads)]),
-          avg_input_read_length = last(avg_input_read_length[!is.na(avg_input_read_length)]),
-          uniquely_mapped_reads = last(uniquely_mapped_reads[!is.na(uniquely_mapped_reads)]),
-          avg_mapped_length = last(avg_mapped_length[!is.na(avg_mapped_length)]),
-          reads_assigned_to_genes = last(reads_assigned_to_genes[!is.na(reads_assigned_to_genes)]),
-          percent_mapped_reads = last(percent_mapped_reads[!is.na(percent_mapped_reads)]),
-          uniquely_mapped_percent = last(uniquely_mapped_percent[!is.na(uniquely_mapped_percent)]),
-          less_than_10M_unique = last(less_than_10M_unique[!is.na(less_than_10M_unique)]),
-          .groups = 'drop'
-        )
-    })
+    final_rrstats <- combined_rrstats %>%
+      group_by(sample) %>%
+      summarise(
+        num_input_reads = ifelse(length(num_input_reads[!is.na(num_input_reads)]) > 0,
+                                 last(num_input_reads[!is.na(num_input_reads)]), NA_real_),
+        avg_input_read_length = ifelse(length(avg_input_read_length[!is.na(avg_input_read_length)]) > 0,
+                                       last(avg_input_read_length[!is.na(avg_input_read_length)]), NA_real_),
+        uniquely_mapped_reads = ifelse(length(uniquely_mapped_reads[!is.na(uniquely_mapped_reads)]) > 0,
+                                       last(uniquely_mapped_reads[!is.na(uniquely_mapped_reads)]), NA_real_),
+        avg_mapped_length = ifelse(length(avg_mapped_length[!is.na(avg_mapped_length)]) > 0,
+                                   last(avg_mapped_length[!is.na(avg_mapped_length)]), NA_real_),
+        reads_assigned_to_genes = ifelse(length(reads_assigned_to_genes[!is.na(reads_assigned_to_genes)]) > 0,
+                                         last(reads_assigned_to_genes[!is.na(reads_assigned_to_genes)]), NA_real_),
+        percent_mapped_reads = ifelse(length(percent_mapped_reads[!is.na(percent_mapped_reads)]) > 0,
+                                      last(percent_mapped_reads[!is.na(percent_mapped_reads)]), NA_real_),
+        uniquely_mapped_percent = ifelse(length(uniquely_mapped_percent[!is.na(uniquely_mapped_percent)]) > 0,
+                                         last(uniquely_mapped_percent[!is.na(uniquely_mapped_percent)]), NA_real_),
+        less_than_10M_unique = ifelse(length(less_than_10M_unique[!is.na(less_than_10M_unique)]) > 0,
+                                      last(less_than_10M_unique[!is.na(less_than_10M_unique)]), NA),
+        .groups = 'drop'
+      )
     
     return(final_rrstats)
   } else {
@@ -1200,8 +1238,7 @@ process_dataset <- function(dataset_name, kreports_folder, bracken_folder = NULL
   merged_with_stats <- add_summary_stats(merge_results$merged)
   
   # Get species list with topN frequency
-  species_list <- get_species_list_with_frequency(merged_with_stats, top_n = TOP_SPECIES_N, 
-                                                  exclude_taxid = EXCLUDE_TAXID)
+  species_list <- get_species_list_with_frequency(merged_with_stats, top_n = TOP_SPECIES_N)
   cat("Generated species list with", nrow(species_list), "species\n")
   
   result <- list(
@@ -1362,5 +1399,4 @@ if (SAVE_OUTPUT) {
 
 # Clean up configuration variables
 rm(args, PROCESS_BRACKEN, SAVE_OUTPUT, ADD_PARAMS, INCLUDE_SUBSPECIES, USE_PARALLEL, OUTPUT_DIR, MIN_CLADE_READS,
-   RUNTIME_DIR, RRSTATS_DIR, METADATA_DIR, parsed_metadata)
-
+   RUNTIME_DIR, RRSTATS_DIR, METADATA_DIR, TOP_SPECIES_N, parsed_metadata)

@@ -11,6 +11,7 @@ install.packages("purrr", dependencies = TRUE)
 install.packages("tibble", dependencies = TRUE)
 install.packages("ggrepel", dependencies = TRUE)
 install.packages("kableExtra", dependencies = TRUE)
+install.packages("gridExtra", dependencies = TRUE)
 
 install.packages("foreach")
 install.packages("doParallel")
