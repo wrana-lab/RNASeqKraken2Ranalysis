@@ -9,10 +9,171 @@ suppressPackageStartupMessages({
   library(here)
   library(dplyr)
   library(stringr)
+  library(httr2)
 })
 
-# Source utils.R for run_as_script functionality
-source(here("scripts", "utils.R"))
+# Utility function from utils.R
+get_latest_timestamped_file <- function(input_dir = "inputs", pattern, database_type = NULL) {
+  # Special handling for database files
+  if (!is.null(database_type)) {
+    db_dir <- here("databases")
+    if (!dir.exists(db_dir)) {
+      stop("Databases directory not found: ", db_dir)
+    }
+    
+    if (database_type == "epathogen") {
+      pattern <- "epathogen.*\\.csv$"
+    } else if (database_type == "HOMD") {
+      pattern <- "HOMD_taxon_table.*\\.(xls|xlsx|tsv|csv)$"
+    }
+    
+    files <- list.files(path = db_dir, pattern = pattern, full.names = TRUE, ignore.case = TRUE)
+  } else {
+    files <- list.files(path = here(input_dir), pattern = pattern, full.names = TRUE)
+  }
+  
+  if (length(files) == 0) {
+    if (!is.null(database_type)) {
+      stop("No matching database files found for type: ", database_type)
+    } else {
+      stop("No matching files found in the directory.")
+    }
+  }
+  
+  # Extract various timestamp formats from filenames:
+  basenames <- basename(files)
+  iso_ts <- stringr::str_extract(basenames, "\\d{4}-\\d{2}-\\d{2}")
+  ymd8_ts <- stringr::str_extract(basenames, "(?<!\\d)\\d{8}(?!\\d)")
+  ymd6_ts <- stringr::str_extract(basenames, "(?<!\\d)\\d{6}(?!\\d)")
+
+  dates <- rep(as.Date(NA), length(files))
+  # parse in order of specificity: YYYY-MM-DD, YYYYMMDD, YYMMDD (e.g., runtime_info250819op.csv -> 250819)
+  has_iso <- !is.na(iso_ts)
+  if (any(has_iso)) dates[has_iso] <- as.Date(iso_ts[has_iso], format = "%Y-%m-%d")
+
+  has_8 <- !is.na(ymd8_ts)
+  if (any(has_8)) dates[has_8 & is.na(dates)] <- as.Date(ymd8_ts[has_8 & is.na(dates)], format = "%Y%m%d")
+
+  has_6 <- !is.na(ymd6_ts)
+  if (any(has_6)) dates[has_6 & is.na(dates)] <- as.Date(ymd6_ts[has_6 & is.na(dates)], format = "%y%m%d")
+
+  if (all(is.na(dates))) {
+    # Fallback to file modification time if no timestamps in filename
+    file_info <- file.info(files)
+    latest_file <- rownames(file_info)[which.max(file_info$mtime)]
+  } else {
+    # select the most recent among parsed dates
+    valid_idx <- which(!is.na(dates))
+    best_idx <- valid_idx[which.max(dates[valid_idx])]
+    latest_file <- files[best_idx]
+  }
+  # Return just the file path
+  latest_file
+}
+
+update_databases <- function(databases_dir = here("Ranalysis", "databases")) {
+  cat("Updating databases in:", databases_dir, "\n")
+  
+  # Ensure databases directory exists
+  if (!dir.exists(databases_dir)) {
+    dir.create(databases_dir, recursive = TRUE)
+    cat("Created databases directory:", databases_dir, "\n")
+  }
+  
+  # ePathogen database
+  epathogen_url <- "https://health.canada.ca/en/epathogen/search"
+  epathogen_dest <- file.path(databases_dir, paste0("epathogen_", Sys.Date(), ".csv"))
+  cat("Downloading ePathogen metadata to:", epathogen_dest, "\n")
+  
+  tryCatch({
+    # Make a request to the API to fetch the latest database metadata
+    resp <- request(epathogen_url) |> req_url_query(format = "csvweb") |> req_perform(path = epathogen_dest)
+    
+    # Check if the request was successful
+    if (resp$status_code != 200) {
+      stop("Failed to fetch the latest ePathogen database. HTTP status: ", resp$status_code)
+    }
+    
+    epath_json <- resp |> resp_body_string()
+    epath_json <- epath_json$results  # Extract the main content
+    library(jsonlite)
+    
+    epath <- fromJSON(epath_json) %>% as.data.frame()
+    epath_2 <- fromJSON(toJSON(epath$results)) %>% as.data.frame()
+    
+    
+    if (is.null(epath_json$results) || length(epath_json$results) == 0) {
+      stop("No results found in ePathogen API response")
+    }
+    
+    cat("ePathogen metadata fetched successfully. Found", length(epath_json$results), "entries.\n")
+    
+    # Convert nested JSON to data frame with proper handling of NULL values
+    epath_list <- list()
+    for (i in seq_along(epath_json$results)) {
+      entry <- epath_json$results[[i]]
+      # Convert NULL values to NA and flatten the structure
+      flattened_entry <- lapply(entry, function(x) if (is.null(x)) NA else x)
+      epath_list[[i]] <- as.data.frame(flattened_entry, stringsAsFactors = FALSE)
+    }
+    
+    # Combine all entries into a single data frame
+    epath_df <- do.call(rbind, epath_list)
+    
+    # Rename columns to match expected format
+    if ("name" %in% names(epath_df)) {
+      epath_df$Name <- epath_df$name
+    }
+    if ("HumanRiskGroup" %in% names(epath_df)) {
+      epath_df$Human.classification <- epath_df$HumanRiskGroup
+    }
+    
+    # Write to CSV file
+    write.csv(epath_df, file = epathogen_dest, row.names = FALSE)
+    cat("ePathogen database saved successfully with", nrow(epath_df), "entries.\n")
+    
+  }, error = function(e) {
+    warning("Failed to fetch ePathogen database: ", e$message)
+    cat("ePathogen database update failed. Error:", e$message, "\n")
+  })
+  
+  # HOMD download URL and destination
+  homd_url <- "https://www.homd.org/download/dld_taxtable_all/text"
+  homd_dest <- file.path(databases_dir, paste0("HOMD_taxon_table_", format(Sys.time(), "%Y-%m-%d_%H%M%S"), ".txt"))
+  cat("Downloading HOMD taxon table to:", homd_dest, "\n")
+  
+  tryCatch({
+    resp <- request(homd_url) |> req_perform(path = homd_dest)
+    
+    # Check if the request was successful
+    if (resp$status_code != 200) {
+      stop("Failed to fetch the latest HOMD database. HTTP status: ", resp$status_code)
+    } else {
+      cat("HOMD database downloaded successfully.\n")
+    }
+    
+    # Process the HOMD file
+    homd_temp <- read.table(homd_dest, header = TRUE, stringsAsFactors = FALSE, sep = "\t", fill = TRUE, skip = 1)
+    
+    # Remove all NCBI.Taxon.ID with NA or 0
+    if ("NCBI.Taxon.ID" %in% names(homd_temp)) {
+      homd_clean <- homd_temp[!is.na(homd_temp$NCBI.Taxon.ID) & homd_temp$NCBI.Taxon.ID != "0", ]
+      cat("Cleaned HOMD database: removed", nrow(homd_temp) - nrow(homd_clean), "entries with missing/invalid NCBI Taxon IDs.\n")
+      cat("Final HOMD database contains", nrow(homd_clean), "entries.\n")
+    } else {
+      homd_clean <- homd_temp
+      cat("Warning: NCBI.Taxon.ID column not found in HOMD data. Using raw data.\n")
+    }
+    
+    write.table(homd_clean, file = homd_dest, sep = "\t", row.names = FALSE, quote = FALSE, col.names = TRUE)
+    
+  }, error = function(e) {
+    warning("Failed to fetch HOMD database: ", e$message)
+    cat("HOMD database update failed. Error:", e$message, "\n")
+  })
+  
+  cat("Database update process completed!\n")
+}
 
 # Load databases function (will be called with configurable path)
 load_databases <- function(databases_dir = here("Ranalysis", "databases")) {
@@ -202,6 +363,7 @@ parse_arguments <- function() {
     df = NULL,
     output = NULL,
     databases_dir = here("Ranalysis", "databases"),
+    update = FALSE,
     help = FALSE
   )
   
@@ -214,6 +376,8 @@ parse_arguments <- function() {
       if (arg == "--help" || arg == "-h") {
         config$help <- TRUE
         break
+      } else if (arg == "--update") {
+        config$update <- TRUE
       } else if (arg == "--df") {
         if (i + 1 <= length(args)) {
           i <- i + 1
@@ -254,6 +418,7 @@ show_help <- function() {
   cat("                            Must have 'name' and 'taxID' columns\n")
   cat("  --output <object>         R object name to store the annotated result\n")
   cat("                            (default: annotated_species)\n")
+  cat("  --update                  Force update of databases from online sources\n")
   cat("  --databases-dir <DIR>     Path to databases directory\n")
   cat("                            (default: Ranalysis/databases)\n")
   cat("  --help, -h               Show this help message\n\n")
@@ -290,7 +455,12 @@ main <- function(args = NULL) {
     show_help()
     return(invisible())
   }
-  
+
+  if (args$update) {
+    cat("Update flag is set. Databases will be reloaded.\n")
+    # Reload databases
+    update_databases(args$databases_dir)
+  }
   # Validate required arguments
   if (is.null(args$df)) {
     cat("Error: --df argument is required.\n\n")
