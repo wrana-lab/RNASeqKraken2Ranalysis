@@ -148,6 +148,3 @@ tryCatch({
 })
 
 cat("R project setup complete!\n")
-
-
-

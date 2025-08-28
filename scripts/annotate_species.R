@@ -96,11 +96,6 @@ update_databases <- function(databases_dir = here("Ranalysis", "databases")) {
     
     epath_json <- resp |> resp_body_string()
     epath_json <- epath_json$results  # Extract the main content
-    library(jsonlite)
-    
-    epath <- fromJSON(epath_json) %>% as.data.frame()
-    epath_2 <- fromJSON(toJSON(epath$results)) %>% as.data.frame()
-    
     
     if (is.null(epath_json$results) || length(epath_json$results) == 0) {
       stop("No results found in ePathogen API response")
@@ -502,4 +497,3 @@ if ("--help" %in% args || "-h" %in% args) {
 main()
 
 rm(args)
-

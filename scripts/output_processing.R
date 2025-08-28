@@ -20,6 +20,10 @@ output_csv_file <- function(x, file_name, dir, script_name) {
   write.csv(x = x, file = file_path, row.names = F)
 }
 
+# The following 4 functions were adapted from
+# https://github.com/fbreitwieser/pavian/blob/a910755648d6f3d7256fac73315bc837b75e8663/R/datainput-read_report.R
+# Florian P Breitwieser, Steven L Salzberg, Pavian: interactive analysis of metagenomics data for microbiome studies and pathogen identification,
+# Bioinformatics, Volume 36, Issue 4, February 2020, Pages 1303–1304, https://doi.org/10.1093/bioinformatics/btz715
 ## recursive function that transforms the kraken dataframe into a cascading list
 build_kraken_tree <- function(report) {
   if (nrow(report) == 0 || nrow(report) == 1) {
@@ -220,7 +224,6 @@ read_report2 <- function(myfile,collapse=TRUE,keep_taxRanks=c("D","K","P","C","O
   report$depth <- nchar(gsub("\\S.*","",report$name))/2
   report$name <- gsub("^ *","",report$name)
   report$name <- paste(tolower(report$taxRank),report$name,sep="_")
-  
   
   ## Only stop at certain taxRanks
   ## filter taxon and further up the tree if 'filter_taxon' is defined
@@ -927,11 +930,15 @@ process_bracken_folder <- function(bracken_folder) {
 }
 
 # Function to merge kreport and bracken data
-merge_data <- function(kreports_data, bracken_data = NULL, add_params = ADD_PARAMS, report_data = NULL) {
+merge_data <- function(kreports_data, bracken_data = NULL, add_params = ADD_PARAMS, report_data = NULL, dataset_name = NULL) {
   # Merge with bracken data if available
   if (!is.null(bracken_data) && nrow(bracken_data) > 0) {
+    # Only join bracken entries whose taxID is present in kreports_data to avoid re-adding filtered species
+    bracken_data_filtered <- bracken_data %>%
+      filter(taxID %in% kreports_data$taxID)
+    
     merged_data <- kreports_data %>%
-      full_join(bracken_data, by = c("name", "taxID"))
+      full_join(bracken_data_filtered, by = c("name", "taxID"))
   } else {
     merged_data <- kreports_data
   }
@@ -974,9 +981,13 @@ merge_data <- function(kreports_data, bracken_data = NULL, add_params = ADD_PARA
           minimum_hit_groups = minimum_hits
         ) %>%
         mutate(
-          # Determine human_reads based on dataset or database information
-          # This is a placeholder - adjust logic based on your specific criteria
-          human_reads = grepl("human|nonhuman", database_used, ignore.case = TRUE)
+          # Determine human_reads based on dataset name
+          human_reads = if (!is.null(dataset_name)) {
+            grepl("nonhuman", dataset_name, ignore.case = TRUE)
+          } else {
+            # Fallback to original logic if dataset_name not provided
+            grepl("human|nonhuman", database_used, ignore.case = TRUE)
+          }
         )
       
       # Join the parameter information with merged_long
@@ -1378,7 +1389,7 @@ parse_rrstats_files <- function(rrstats_folder) {
     
     # Read the file as tab-separated
     tryCatch({
-      rrstats_data <- read.table(rrstats_file, header = FALSE, sep = "\t", stringsAsFactors = FALSE, 
+      rrstats_data <- read.table(rrstats_file, header = TRUE, sep = "\t", stringsAsFactors = FALSE, 
                                  skip = 0, fill = TRUE, comment.char = "")
       
       # Remove any completely empty rows
@@ -1494,7 +1505,8 @@ process_dataset <- function(dataset_name, kreports_folder, bracken_folder = NULL
   
   # Merge data
   merge_results <- merge_data(kreport_results$kreports_combined, bracken_data, 
-                              add_params = add_params, report_data = kreport_results$report_data)
+                              add_params = add_params, report_data = kreport_results$report_data,
+                              dataset_name = dataset_name)
   
   # Add summary statistics
   merged_with_stats <- add_summary_stats(merge_results$merged)
@@ -1660,5 +1672,4 @@ if (SAVE_OUTPUT) {
 }
 
 # Clean up configuration variables
-rm(args, PROCESS_BRACKEN, SAVE_OUTPUT, ADD_PARAMS, INCLUDE_SUBSPECIES, USE_PARALLEL, OUTPUT_DIR, MIN_CLADE_READS,
-   RUNTIME_DIR, RRSTATS_DIR, METADATA_DIR, TOP_SPECIES_N, parsed_metadata)
+rm(args, PROCESS_BRACKEN, SAVE_OUTPUT, ADD_PARAMS, INCLUDE_SUBSPECIES, USE_PARALLEL, OUTPUT_DIR, MIN_CLADE_READS, RUNTIME_DIR, RRSTATS_DIR, METADATA_DIR, TOP_SPECIES_N, parsed_metadata)
