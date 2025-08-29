@@ -102,7 +102,6 @@ packages_to_install <- c(
   "openxlsx",
   "foreach",
   "doParallel",
-  "httr2"  # Added for web requests in update_databases
 )
 
 # Function to check if package is installed in user library

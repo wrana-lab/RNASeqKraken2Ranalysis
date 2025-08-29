@@ -3,11 +3,12 @@ Denis R | Jeff Wrana Lab
 
 ## Project Description
 
+
+
 ## Pipeline Dependencies
 The following (along with all dependencies) need to be installed in the computer node image – contact cluster admin if you receive any “ModuleNotFoundError”.
 1.	R (v4.0+)
-  a.	R packages includes: `here`, `ggplot2`, `dplyr`, `tidyr`, `stringr`, `purrr`, `tibble`, `ggrepel`, `kableExtra`, `gridExtra`, `openxlsx`, `foreach`, `doParallel`, `httr2`
-
+  a.	R packages includes: `here`, `ggplot2`, `dplyr`, `tidyr`, `stringr`, `purrr`, `tibble`, `ggrepel`, `kableExtra`, `gridExtra`, `openxlsx`, `foreach`, `doParallel`
 ## Input Folder Structure
 ```
 project-name_date/

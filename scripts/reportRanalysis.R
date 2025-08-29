@@ -24,6 +24,14 @@ run_as_script <- function() {
   return(!interactive() && length(sys.calls()) == 0)
 }
 
+# Utility function from output_processing.R
+output_csv_file <- function(x, file_name, dir, script_name) {
+  timestamp <- format(Sys.time(), "%y%m%d")
+  # Construct the full file path
+  file_path <- file.path(here(dir), paste0(file_name, timestamp, script_name, ".csv"))
+  write.csv(x = x, file = file_path, row.names = F)
+}
+
 get_latest_timestamped_file <- function(pattern, path = ".") {
   files <- list.files(path = path, pattern = pattern, full.names = TRUE)
   
@@ -702,7 +710,7 @@ create_correlation_analysis <- function(data1, data2, data1_name, data2_name, da
               y = paste0("Log10(", data2_name, " ", data2_col_suffix, " + 1)"),
               title = paste0("Correlation: ", data1_name, " vs ", data2_name, " (", sample_id, ")"),
               subtitle = paste0("Pearson r = ", round(cor_coef, 5), " (n = ", nrow(sample_comparison), " species)")
-            ) + coord_fixed()
+            ) + coord_fixed() 
         
         sample_results[[length(sample_results) + 1]] <- list(
           sample = sample_id,
@@ -1712,6 +1720,24 @@ species_annotation_report <- function(species_annotation_data, report_dir, batch
       "- Total annotated species: ", nrow(species_annotation_data), "\n"
     )
     
+    # Calculate Risk Group summary
+    risk_group_summary <- species_annotation_data %>%
+      count(RiskGroup, name = "Number_of_species") %>%
+      mutate(
+        RiskGroup = ifelse(is.na(RiskGroup) | RiskGroup == "", "NotAnnotated", RiskGroup),
+        Percentage = round(100 * Number_of_species / sum(Number_of_species), 1)
+      ) %>%
+      arrange(RiskGroup)
+    
+    # Add Risk Group summary to reference text
+    ref_text <- paste0(ref_text, "\nRisk Group Summary:\n")
+    for (i in 1:nrow(risk_group_summary)) {
+      ref_text <- paste0(ref_text, 
+                        risk_group_summary$RiskGroup[i], ": ", 
+                        risk_group_summary$Number_of_species[i], " species (", 
+                        risk_group_summary$Percentage[i], "%)\n")
+    }
+    
     # Create summary plot using ggplot
     summary_plot <- ggplot() + 
       theme_void() + 
@@ -1759,6 +1785,10 @@ species_annotation_report <- function(species_annotation_data, report_dir, batch
         plot_type = "homd",
         detailed = "Freq"
       )
+      # Add frequency subtitle to HOMD plot
+      detailed_homd_plot <- detailed_homd_plot + 
+        labs(subtitle = paste0(detailed_homd_plot$labels$subtitle, 
+                              "\nFrequency in top ", config$TOP_N_FREQ, " species of samples"))
       print(detailed_homd_plot)
       
       # Detailed risk group plot
@@ -1767,6 +1797,10 @@ species_annotation_report <- function(species_annotation_data, report_dir, batch
         plot_type = "risk_group",
         detailed = "Freq"
       )
+      # Add frequency subtitle to Risk Group plot
+      detailed_risk_group_plot <- detailed_risk_group_plot + 
+        labs(subtitle = paste0(detailed_risk_group_plot$labels$subtitle, 
+                              "\nFrequency in top ", config$TOP_N_FREQ, " species of samples"))
       print(detailed_risk_group_plot)
       
     }, error = function(e) {
@@ -1947,44 +1981,40 @@ species_annotation_report <- function(species_annotation_data, report_dir, batch
           annotation_plots[[paste0(sample_name, "_risk_group_detailed")]] <- detailed_risk_group_plot
           
           # Add percentage plots using calculate_species_percentages
-          tryCatch({
-            # Calculate species percentages for this sample
-            species_percentages <- calculate_species_percentages(sample_annotated)
+          species_percentages <- calculate_species_percentages(sample_annotated)
+          
+          if (nrow(species_percentages) > 0) {
+            # Add percentage data back to sample_annotated for plotting
+            sample_annotated_with_pct <- sample_annotated %>%
+              left_join(
+                species_percentages %>% select(name, percentage),
+                by = "name"
+              ) %>%
+              mutate(percentage = ifelse(is.na(percentage), 0, percentage))
             
-            if (nrow(species_percentages) > 0) {
-              # Add percentage data back to sample_annotated for plotting
-              sample_annotated_with_pct <- sample_annotated %>%
-                left_join(
-                  species_percentages %>% select(name, percentage),
-                  by = "name"
-                ) %>%
-                mutate(percentage = ifelse(is.na(percentage), 0, percentage))
-              
-              # Percentage HOMD plot
-              percentage_homd_plot <- generate_annotation_plot(
-                df = sample_annotated_with_pct,
-                plot_type = "homd",
-                detailed = "percentage",
-                sample_name = sample_name,
-                top_n = config$TOP_N_PLOT
-              )
-              annotation_plots[[paste0(sample_name, "_homd_percentage")]] <- percentage_homd_plot
-              
-              # Percentage risk group plot
-              percentage_risk_group_plot <- generate_annotation_plot(
-                df = sample_annotated_with_pct,
-                plot_type = "risk_group",
-                detailed = "percentage",
-                sample_name = sample_name,
-                top_n = config$TOP_N_PLOT
-              )
-              annotation_plots[[paste0(sample_name, "_risk_group_percentage")]] <- percentage_risk_group_plot
-            }
-          }, error = function(e) {
-            cat("Warning: Error creating percentage plots for", sample_name, ":", e$message, "\n")
-          })
+            # Percentage HOMD plot
+            percentage_homd_plot <- generate_annotation_plot(
+              df = sample_annotated_with_pct,
+              plot_type = "homd",
+              detailed = "percentage",
+              sample_name = sample_name,
+              top_n = config$TOP_N_PLOT
+            )
+            annotation_plots[[paste0(sample_name, "_homd_percentage")]] <- percentage_homd_plot
+            
+            # Percentage risk group plot
+            percentage_risk_group_plot <- generate_annotation_plot(
+              df = sample_annotated_with_pct,
+              plot_type = "risk_group",
+              detailed = "percentage",
+              sample_name = sample_name,
+              top_n = config$TOP_N_PLOT
+            )
+            annotation_plots[[paste0(sample_name, "_risk_group_percentage")]] <- percentage_risk_group_plot
+          } else {
+            cat("Warning: No percentage data available for", sample_name, "\n")
+          }
         }
-        
       }, error = function(e) {
         cat("Warning: Error generating annotation plots for", sample_name, ":", e$message, "\n")
         empty_plot <- ggplot() + 
@@ -2091,7 +2121,12 @@ pathogen_detection_report <- function(pathogen_annotation_data, merged_long_data
         # Calculate sample-level percentages for pathogenic species only
         pathogen_sample_data <- calculate_pathogen_percentages(merged_long_data, pathogen_species)
         
-        if (nrow(pathogen_sample_data) > 0) {
+        # Add RiskGroup annotation to pathogen sample data
+        pathogen_sample_annotation_data <- pathogen_sample_data %>%
+          left_join(pathogen_species %>% select(name, RiskGroup), 
+                   by = c("RG3/4 and NotAnnotated Species" = "name"))
+        
+        if (nrow(pathogen_sample_annotation_data) > 0) {
           excel_file <- file.path(report_dir, "pathogen_detection_report.xlsx")
           
           # Create workbook
@@ -2099,11 +2134,11 @@ pathogen_detection_report <- function(pathogen_annotation_data, merged_long_data
           addWorksheet(wb, "Pathogen_Detection")
           
           # Create clean headers
-          headers <- c("Sample Name", "RG3/4 and NotAnnotated Species", "Percentage of Sample Reads")
+          headers <- c("Sample Name", "RG3/4 and NotAnnotated Species", "Percentage of Reads in Sample", "Risk Group")
           
           # Write headers and data
           writeData(wb, "Pathogen_Detection", t(headers), startRow = 1, colNames = FALSE)
-          writeData(wb, "Pathogen_Detection", pathogen_sample_data, startRow = 2, colNames = FALSE)
+          writeData(wb, "Pathogen_Detection", pathogen_sample_annotation_data, startRow = 2, colNames = FALSE)
           
           # Auto-size columns
           setColWidths(wb, "Pathogen_Detection", cols = 1:length(headers), widths = "auto")
@@ -2118,7 +2153,7 @@ pathogen_detection_report <- function(pathogen_annotation_data, merged_long_data
           addStyle(wb, "Pathogen_Detection", header_style, rows = 1, cols = 1:length(headers))
           
           # Add borders to data cells
-          data_rows <- 2:(nrow(pathogen_sample_data) + 1)
+          data_rows <- 2:(nrow(pathogen_sample_annotation_data) + 1)
           data_style <- createStyle(
             border = "TopBottomLeftRight",
             borderStyle = "thin"
@@ -2128,13 +2163,16 @@ pathogen_detection_report <- function(pathogen_annotation_data, merged_long_data
           }
           
           # Add conditional formatting for high percentages
-          if (nrow(pathogen_sample_data) > 1) {
+          if (nrow(pathogen_sample_annotation_data) > 1) {
             conditionalFormatting(wb, "Pathogen_Detection", 
                                 cols = 3, 
                                 rows = data_rows,
                                 type = "colorScale", 
                                 style = c("#FFFFFF", "#FF6B6B"))
           }
+          
+          addWorksheet(wb, "Pathogen_Annotations")
+          writeData(wb, "Pathogen_Annotations", pathogen_species, startRow = 1, colNames = TRUE)
           
           # Save workbook
           saveWorkbook(wb, excel_file, overwrite = TRUE)
@@ -2151,7 +2189,7 @@ pathogen_detection_report <- function(pathogen_annotation_data, merged_long_data
       cat("Warning: Failed to export pathogen detection to Excel:", e$message, "\n")
       print(e)
     })
-    
+    return(pathogen_species)
   } else {
     # Per-sample mode - generate plots for individual sample
     sample_merged_long <- merged_long_data  # This is the per-sample data
@@ -2344,7 +2382,7 @@ pathogen_detection_report <- function(pathogen_annotation_data, merged_long_data
           coord_flip() +
           labs(
             title = paste("Pathogen Detection: Sample vs Batch Comparison"),
-            subtitle = paste("Sample:", sample_name, "| Top 15 pathogenic species by sample cladeReads (log scale)"),
+            subtitle = paste("Sample:", sample_name, "\n Top 15 pathogenic species by sample cladeReads (log scale)"),
             x = "Species",
             y = "CladeReads (log scale)",
             fill = "Data Source"
@@ -2412,18 +2450,27 @@ calculate_species_percentages <- function(merged_long_data) {
 }
 
 # Helper function to calculate pathogen percentages by sample
-calculate_pathogen_percentages <- function(merged_long_data, pathogen_species = NULL) {
+calculate_pathogen_percentages <- function(merged_long_data, pathogen_species_list) {
   tryCatch({
-    # Use calculate_species_percentages as helper function to get all species percentages
-    all_species_percentages <- calculate_species_percentages(merged_long_data)
+    merged_long_data <- merged_long_data %>% filter(taxID %in% pathogen_species_list$taxID)
+    
+    trimmed_long <- merged_long_data %>% filter(!is.na(cladeReads))
+    
+    # Split by sample
+    trimmed_by_sample <- split(trimmed_long, trimmed_long$sample)
+    trimmed_by_sample <- lapply(trimmed_by_sample, as.data.frame)
+    
+    # Use calculate_species_percentages as helper function to get percentages 
+    # per sample
+    all_species_percentages <- do.call(rbind, lapply(trimmed_by_sample, calculate_species_percentages))
     
     if (nrow(all_species_percentages) == 0) {
       return(data.frame())
     }
     
-    # If pathogen_species provided, filter for only those species
-    if (!is.null(pathogen_species)) {
-      pathogen_taxids <- unique(pathogen_species$taxID)
+    # If pathogen_species_list provided, filter for only those species
+    if (!is.null(pathogen_species_list)) {
+      pathogen_taxids <- unique(pathogen_species_list$taxID)
       pathogen_percentages <- all_species_percentages %>%
         # Get taxID from merged_long_data to filter by
         left_join(
@@ -2651,11 +2698,20 @@ if (config$SA_STATS) {
 
   if (exists("annotated_species", envir = .GlobalEnv)) {
     annotated_species <- get("annotated_species", envir = .GlobalEnv)
+    merged_long_data <- if (!is.null(nonhuman_results) && !is.null(nonhuman_results$merged_long)) {
+      nonhuman_results$merged_long
+    } else {
+      unaligned_results$merged_long
+    }
     
-    # Save annotated species to CSV before generating PDF in batch mode
-    annotated_species_csv <- file.path(config$reports_dir, "annotated_species.csv")
-    write.csv(annotated_species, annotated_species_csv, row.names = FALSE)
-    cat("Annotated species saved to:", annotated_species_csv, "\n")
+    # Merge species annotation columns to the merged_long_data joining by taxID
+    full_results_with_annotations <- merged_long_data %>%
+      left_join(annotated_species %>% select(taxID, RiskGroup, HOMD, HOMD.Category), by = "taxID") %>%
+      filter(!is.na(cladeReads))  # Trim rows where cladeReads are NA
+    
+    # Save the full results with annotations using output_csv_file
+    output_csv_file(full_results_with_annotations, "full_results_with_annotated_species", config$reports_dir, "rra")
+    cat("Full results with species annotations saved to output directory\n")
     
     species_annotation_report(annotated_species, config$reports_dir, TRUE, config)
     cat("Species annotation completed successfully\n")
@@ -2676,7 +2732,8 @@ if (config$PD_STATS) {
     } else {
       unaligned_results$merged_long
     }
-    pathogen_detection_report(annotated_species, merged_long_data, config$reports_dir, TRUE, config)
+    # pathogen_detection_report(annotated_species, merged_long_data, config$reports_dir, TRUE, config)
+    pathogen_species <- pathogen_detection_report(annotated_species, merged_long_data, config$reports_dir, TRUE, config)
   } else {
     stop("ERROR: annotated_species not found after running annotate_species.R")
   }

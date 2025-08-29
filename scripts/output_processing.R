@@ -641,8 +641,8 @@ process_kreport_folder <- function(kreports_folder, include_subspecies = INCLUDE
   
   kreports_files <- list.files(kreports_folder, pattern = "\\.(kreport|k2report)$", full.names = TRUE)
   
-  # Filter out files containing "bracken_species" in the filename
-  kreports_files <- kreports_files[!grepl("bracken_species", basename(kreports_files))]
+  # Filter out files containing "bracken" in the filename
+  kreports_files <- kreports_files[!grepl("bracken_", basename(kreports_files))]
   
   if (length(kreports_files) == 0) {
     warning("No .kreport or .k2report files found in: ", kreports_folder)
@@ -936,7 +936,6 @@ merge_data <- function(kreports_data, bracken_data = NULL, add_params = ADD_PARA
     # Only join bracken entries whose taxID is present in kreports_data to avoid re-adding filtered species
     bracken_data_filtered <- bracken_data %>%
       filter(taxID %in% kreports_data$taxID)
-    
     merged_data <- kreports_data %>%
       full_join(bracken_data_filtered, by = c("name", "taxID"))
   } else {
@@ -966,7 +965,13 @@ merge_data <- function(kreports_data, bracken_data = NULL, add_params = ADD_PARA
     pivot_wider(
       names_from = measurement,
       values_from = value
-    )
+    ) 
+  
+  # Filter out rows where there is a bracken_read but cladeReads is NA
+  # This is to address the issue that we are filtering kreports by distinct minimizer 
+  # but did not apply the same filter to bracken reports
+  merged_long <- merged_long %>%
+    filter(!(is.na(cladeReads) & !is.na(bracken_reads)))
   
   # Add parameter columns if requested
   if (add_params) {

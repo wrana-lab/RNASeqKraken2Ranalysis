@@ -1,0 +1,5 @@
+.DS_Store
+.Rproj.user
+outputs/
+scripts/run_rra.R
+RNASeqKraken2Ranalysis.Rproj
