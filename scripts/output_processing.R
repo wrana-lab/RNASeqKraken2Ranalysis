@@ -970,8 +970,10 @@ merge_data <- function(kreports_data, bracken_data = NULL, add_params = ADD_PARA
   # Filter out rows where there is a bracken_read but cladeReads is NA
   # This is to address the issue that we are filtering kreports by distinct minimizer 
   # but did not apply the same filter to bracken reports
-  merged_long <- merged_long %>%
+  if (!is.null(bracken_data) && nrow(bracken_data) > 0) {
+    merged_long <- merged_long %>%
     filter(!(is.na(cladeReads) & !is.na(bracken_reads)))
+  }
   
   # Add parameter columns if requested
   if (add_params) {

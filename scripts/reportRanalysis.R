@@ -2452,8 +2452,6 @@ calculate_species_percentages <- function(merged_long_data) {
 # Helper function to calculate pathogen percentages by sample
 calculate_pathogen_percentages <- function(merged_long_data, pathogen_species_list) {
   tryCatch({
-    merged_long_data <- merged_long_data %>% filter(taxID %in% pathogen_species_list$taxID)
-    
     trimmed_long <- merged_long_data %>% filter(!is.na(cladeReads))
     
     # Split by sample
