@@ -3,17 +3,37 @@ Denis R | Jeff Wrana Lab
 
 ## Project Description
 
-
-
 ## Pipeline Dependencies
 The following (along with all dependencies) need to be installed in the computer node image – contact cluster admin if you receive any “ModuleNotFoundError”.
 1.	R (v4.0+)
   a.	R packages includes: `here`, `ggplot2`, `dplyr`, `tidyr`, `stringr`, `purrr`, `tibble`, `ggrepel`, `kableExtra`, `gridExtra`, `openxlsx`, `foreach`, `doParallel`
 ## Input Folder Structure
+`[not_accessed_by_Ranalysis]` 
 ```
 project-name_date/
-├── resources/
+├── pipeline_log
+├── version_time_log
+├── runtime
+├── QC/
+│   └── run_read_stats.txt
+├── kraken2/
+│   ├── c<confidence>m<min-hits><db-dir>_unaligned/
+│   │   ├── <sampleid>_<params>_report.k2report
+│   │   ├── <sampleid>_<params>_report_bracken_species.k2report
+│   │   ├── output/
+│   │   └── unclassified/
+│   └── c<confidence>m<min-hits><db-dir>_nonhuman/
+│       ├── <sampleid>_<params>_report.k2report
+│       ├── <sampleid>_<params>_report_bracken_species.k2report
+│       ├── output/
+│       └── unclassified/
+├── bracken/
+│   ├── c<confidence>m<min-hits><db-dir>_unaligned/
+│   │   └── <sampleid>_bracken_S.txt
+│   └── c<confidence>m<min-hits><db-dir>_nonhuman/
+│       └── <sampleid>_bracken_S.txt
 ├── Ranalysis/
+│   ├── install.R
 │   ├── scripts/
 │   │   ├── utils.R
 │   │   ├── output_processing.R
@@ -23,51 +43,16 @@ project-name_date/
 │   └── databases/
 │       ├── epathogen-\<timestamp>-result.csv
 │       └── HOMD_taxon_table\<timestamp>.csv
-└── raw_fastqs/
-    └── fastq files
+├── [STAR]/
+├── [BAM]/
+├── [RPM]/
+├── [jobs]/
+├── [resources]/
+└── [raw_fastqs]/
 ```
 
 ## Output Folder Structure
-```
-projectname_date/
-├── pipeline_log
-├── version_time_log
-├── runtime
-├── QC/
-│   └── run_read_stats.txt
-├── bracken/
-│   ├── c<confidence>m<min-hits><db-dir>_nonhuman/
-│   │   └── <sampleid>_bracken_S.txt
-│   └── c<confidence>m<min-hits><db-dir>_unaligned/
-│       └── <sampleid>_bracken_S.txt
-├── kraken2/
-│   ├── c<confidence>m<min-hits><db-dir>_unaligned/
-│   │   ├── <sampleid>_<params>_report.k2report
-│   │   ├── <sampleid>_<params>_report_bracken_species.k2report
-│   │   ├── output/
-│   │   │   └── <sampleid>_<params>_output.kraken2
-│   │   └── unclassified/
-│   │   	├── <sampleid>_<params>_unclass_1.fq
-│   │   	└── <sampleid>_<params>_unclass_2.fq
-│   └── c<confidence>m<min-hits><db-dir>_nonhuman/
-│       ├── <sampleid>_<params>_report.k2report
-│       ├── <sampleid>_<params>_report_bracken_species.k2report
-│       ├── output/
-│       │   └── <sampleid>_<params>_output.kraken2
-│       └── unclassified/
-│           ├── <sampleid>_<params>_unclass_1.fq
-│           └── <sampleid>_<params>_unclass_2.fq
-├── jobs/
-│   ├── sbatch files
-│   └── job.out files	
-├── STAR/
-│   └── <sampleid>/
-│       ├── STAR output files
-│       ├── <sampleid>-Unmapped.out.mate1
-│       └── <sampleid>-Unmapped.out.mate2
-└── raw_fastqs/
-    └── fastq files
-```
+All outputs into Ranalysis/outputs
 
 ## R analyis
 Outputs of the RNAseq pipeline are processed downstream in R. The analysis and report generation is orchestrated by the reportRanalysis.R script which uses multiple other R scripts as modules to carry out specific functions. These are executed by using source(“scripts”) in R; hence, all variables are shared via the GlobalEnvir in R.  
