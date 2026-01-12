@@ -3,3 +3,6 @@
 outputs/
 scripts/run_rra.R
 RNASeqKraken2Ranalysis.Rproj
+renv.lock
+RNASeqAnalysis.Rproj
+.Rprofile

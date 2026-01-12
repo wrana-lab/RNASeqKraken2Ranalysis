@@ -101,7 +101,7 @@ packages_to_install <- c(
   "gridExtra",
   "openxlsx",
   "foreach",
-  "doParallel",
+  "doParallel"
 )
 
 # Function to check if package is installed in user library
